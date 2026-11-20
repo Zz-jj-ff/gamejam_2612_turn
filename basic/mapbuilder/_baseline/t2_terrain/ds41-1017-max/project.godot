@@ -1,0 +1,18 @@
+config_version=5
+
+[application]
+config/name="AETHER — Procedural Wilds"
+config/description="10.24 km² purely procedural natural terrain: snowfield, tropical rainforest, cliff-and-river valley."
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7", "Forward Plus")
+
+[display]
+window/size/viewport_width=1600
+window/size/viewport_height=900
+window/stretch/mode="canvas_items"
+
+[rendering]
+renderer/rendering_method="forward_plus"
+rendering_device/driver="vulkan"
+anti_aliasing/quality/msaa_3d=2
+environment/defaults/default_clear_color=Color(0.02, 0.03, 0.05, 1)

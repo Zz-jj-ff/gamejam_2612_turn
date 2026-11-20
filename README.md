@@ -1,0 +1,71 @@
+# gamejam_2612_turn
+
+2026 年 12 月 Game Jam 的统一仓库：三个部分全部是 **Godot 4.7.2 纯代码程序化**工程，
+零外部模型、零位图贴图（材质一律是写进 shader 的数学函数）。
+
+| 目录 | 内容 | 一句话 |
+| --- | --- | --- |
+| `basic/` | 三个玩法原型 | ACT 四足刀客、VESPER 程序化主角、3×3 程序化地图/场景 |
+| `character_design/` | 敌人与武器角色工程 | ARC Sentinel、Shard Phantom、Boss Leviathan、少女头部、电弧剑 |
+| `main/` | 正式项目 | 待填充 |
+
+各目录的详细能力范围、参数开关与调参说明见各自目录下的 `README.md`。
+
+## basic
+
+| 目录 | 项目 | 一句话 |
+| --- | --- | --- |
+| `basic/actdemo/` | ACT // 四足刀客 | 四足机甲、武士刀、赛博朋克巷战的动作 demo，「看见就打不到 / 看见就会死」的视线博弈 |
+| `basic/character/` | T4 // VESPER | 程序化四足高速 ACT 主角：4 次中心对称的噬菌体式机械腿 + 人形战斗底盘 + 一把激光大剑 |
+| `basic/mapbuilder/` | 程序化地图/场景探索 | 3 个任务（赛博城市 / 自然地形 / 宇宙飞船）× 3 个模型的 9 个独立交付，初稿冻结在 `_baseline/` |
+
+## character_design
+
+| 目录 | 角色 | 定位 |
+| --- | --- | --- |
+| `character_design/arc_sentinel/` | ARC // SENTINEL v2 | 基础近战敌人 · 双轮平衡机兵 |
+| `character_design/shard_phantom/` | SHARD // PHANTOM | 位移敌人 · 模块化悬浮人形 |
+| `character_design/boss/` | LEVIATHAN // ABYSSAL WARDEN | 最终 Boss · 机械章鱼 |
+| `character_design/girl_head/` | 少女头部 | 程序化头部/发型建模与材质实验 |
+| `character_design/weapon_electricity_sword/` | 电弧剑 | 电弧场 / ribbon 独立资产 |
+| `character_design/_kit_template/` | 套件模板 | 新建角色工程的共享骨架 |
+
+三个敌人工程共享同一套「暗黑舞台 + 霓虹轮廓光 + ACES/Bloom/SSAO + 扫描线暗角」
+的呈现体系，与 `basic/actdemo`、`basic/character` 同一画风家族。
+
+## 运行
+
+需要 Godot **4.7.2**（`godot` 在 `PATH` 里，或改各 `run.sh` 里的路径）。
+
+```bash
+cd basic/actdemo    && ./run.sh                 # 游戏本体
+cd basic/character  && ./run.sh                 # 展示循环，按任意移动/攻击键接管
+cd basic/mapbuilder/t3_spaceship/ds41-1017-max && ./run.sh   # 任选一格，9 格都是独立工程
+
+cd character_design/arc_sentinel  && ./run.sh
+cd character_design/shard_phantom && ./run.sh
+cd character_design/boss          && ./run.sh
+```
+
+`mapbuilder` 的每一格、`character_design` 的每个角色都是可独立打开的 Godot 工程；
+首次打开若出现 `class_name` 未注册，先执行一次 `godot --headless --path . --import`。
+
+## 生成物不入库
+
+按「源码能直接生成的一律不入库」的约定，以下内容被根目录 `.gitignore` 排除，
+随时可由源码重建（文件仍保留在本地磁盘）：
+
+| 路径 | 重建方式 |
+| --- | --- |
+| `**/.godot/` | 打开工程时自动重建（`godot --headless --path . --import`） |
+| `basic/actdemo/build/` | `./web/build_web.sh build_all`（Web / Windows / macOS 三端导出） |
+| `basic/actdemo/shots/` | `DISPLAY=:0 godot --path . res://scenes/shots.tscn` |
+| `**/renders/` | 各工程 `scenes/*shots.tscn`、`render_stills.tscn` / `render_movie.tscn` 等渲染场景 |
+| `basic/mapbuilder/t3_spaceship/*/baked/` | `./bake.sh`（`godot --path . -- --bake`） |
+| `basic/mapbuilder/t3_spaceship/qwen38-max/cache/` | 首次运行按 `scripts/main.gd` 的缓存逻辑生成 |
+| `basic/mapbuilder/t2_terrain/ds41-1017-max/assets/` | `python3 tools/gen_textures.py`、`gen_rockface.py --tex --mesh`、`gen_waterfall.py`（需 numpy + Pillow） |
+| `basic/actdemo/web/dev_*.pem` | 本地自签 TLS 证书，`openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -keyout dev_key.pem -out dev_cert.pem -subj "/CN=localhost"` |
+| `_backup_nested_git/` | 旧嵌套 git 仓库的 bundle 备份，仅留本地 |
+
+调试截图（各项目的 `shots/`、`screenshots/`）与编辑器缓存已从仓库移除，
+统计层面的取舍见上表。

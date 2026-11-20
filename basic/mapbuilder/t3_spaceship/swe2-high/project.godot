@@ -1,0 +1,24 @@
+config_version=5
+
+[application]
+config/name="ISV MERIDIAN — Procedural Starship"
+config/description="Pure-procedural mall-scale starship, realistic sci-fi style. No textures, no external assets."
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7", "Forward Plus")
+
+[display]
+window/size/viewport_width=1600
+window/size/viewport_height=900
+window/stretch/mode="canvas_items"
+
+[rendering]
+renderer/rendering_method="forward_plus"
+rendering_device/driver="vulkan"
+anti_aliasing/quality/msaa_3d=2
+environment/defaults/default_clear_color=Color(0.008, 0.01, 0.016, 1)
+
+[input]
+move_f={"deadzone":0.2,"events":[Object(InputEventKey,"physical_keycode":87)]}
+move_b={"deadzone":0.2,"events":[Object(InputEventKey,"physical_keycode":83)]}
+move_l={"deadzone":0.2,"events":[Object(InputEventKey,"physical_keycode":65)]}
+move_r={"deadzone":0.2,"events":[Object(InputEventKey,"physical_keycode":68)]}

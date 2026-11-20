@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://carcsentinel001"]
+
+[ext_resource type="Script" path="res://scripts/ch/arc_sentinel.gd" id="1_char"]
+
+[node name="ArcSentinel" type="Node3D"]
+script = ExtResource("1_char")

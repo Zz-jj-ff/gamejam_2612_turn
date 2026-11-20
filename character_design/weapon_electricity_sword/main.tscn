@@ -1,0 +1,81 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://src/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://src/arc_sword.gd" id="2_sword"]
+[ext_resource type="Shader" path="res://shaders/vignette.gdshader" id="3_vignette"]
+[ext_resource type="Script" path="res://src/generator_hilt.gd" id="4_hilt"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_vignette"]
+shader = ExtResource("3_vignette")
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1_main")
+
+[node name="ArcSword" type="Node3D" parent="."]
+script = ExtResource("2_sword")
+
+[node name="GeneratorHilt" type="Node3D" parent="ArcSword"]
+script = ExtResource("4_hilt")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+fov = 39.0
+near = 0.05
+far = 100.0
+
+[node name="Overlay" type="CanvasLayer" parent="."]
+layer = 10
+
+[node name="Vignette" type="ColorRect" parent="Overlay"]
+material = SubResource("ShaderMaterial_vignette")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="ChargeBar" type="Control" parent="Overlay"]
+visible = false
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -150.0
+offset_top = -66.0
+offset_right = 150.0
+offset_bottom = -62.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="Back" type="ColorRect" parent="Overlay/ChargeBar"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.09, 0.055, 0.02, 0.55)
+
+[node name="Fill" type="ColorRect" parent="Overlay/ChargeBar"]
+anchor_bottom = 1.0
+offset_right = 0.0
+grow_vertical = 2
+mouse_filter = 2
+color = Color(1, 0.55, 0.1, 0.85)
+
+[node name="Hint" type="Label" parent="Overlay"]
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -44.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 0.841, 0.612, 1)
+theme_override_font_sizes/font_size = 11
+text = "DRAG OR A·D ORBIT   ·   WHEEL ZOOM   ·   HOLD SPACE TO CHARGE   ·   R RESET"
+horizontal_alignment = 1
