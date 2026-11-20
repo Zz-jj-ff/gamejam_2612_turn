@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/enemies/duelist/duelist_model.gd" id="1_model"]
+
+[node name="Duelist" type="Node3D"]
+transform = Transform3D(1.36, 0, 0, 0, 1.36, 0, 0, 0, 1.36, 0, 0, 0)
+script = ExtResource("1_model")

@@ -1,0 +1,4 @@
+.godot/
+build/
+previews/
+web/dev_*.pem
