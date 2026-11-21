@@ -38,6 +38,7 @@
 需要 Godot **4.7.2**（`godot` 在 `PATH` 里，或改各 `run.sh` 里的路径）。
 
 ```bash
+cd main/cargo_hold2 && ./run.sh                 # ??????
 cd basic/actdemo    && ./run.sh                 # 游戏本体
 cd basic/character  && ./run.sh                 # 展示循环，按任意移动/攻击键接管
 cd basic/mapbuilder/t3_spaceship/ds41-1017-max && ./run.sh   # 任选一格，9 格都是独立工程
