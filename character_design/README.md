@@ -6,12 +6,12 @@
 
 | 目录 | 角色 | 定位 | 动画 | 视觉核心 |
 | --- | --- | --- | --- | --- |
-| `arc_sentinel/` | **ARC // SENTINEL v2** | 基础近战敌人 · 双轮平衡机兵 | rest / idle / walk / attack / attack_up / defend / draw / sheathe | 正面大摄像头（战斗时缩回机身）、黑色+橙红金属、双实心胎纹轮 + 独立悬挂、三球关节长臂、橙红电弧刀、硬光盾 |
+| `arc_sentinel/` | **ARC // SENTINEL v3** | 普通近战小怪 · 三角履带炮塔 | idle / run / attack1 / attack2 / block | 两条钝角三角履带夹 0.52 m 立方体炮塔、半径=边长 1/3 的红色摄像头（内球旋转、外壳固定）、眼下一排闪烁状态灯、单条顶置三关节机械臂、黑色发射器 + 电弧闪电剑 |
 | `shard_phantom/` | **SHARD // PHANTOM** | 位移敌人 · 模块化悬浮人形 | idle / walk / attack / disperse / reform | 大型相机镜头头、90 个独立模块与橙红推进器（背部/小腿/脚底悬浮喷口）、爆散重组、掌心手里剑 |
-| `boss/` | **LEVIATHAN // ABYSSAL WARDEN** | 最终 Boss · 机械章鱼 | 8 条独立链式触手 · idle / support / attack1-3 / laser / 两阶段 | 2 m 半径装甲球、8 片滑动虹膜壳 + 连续孔径环、红色大摄像头眼、红色能量核心与透明约束层、15 m 横扫 |
+| `boss/` | **LEVIATHAN // ABYSSAL WARDEN** | 最终 Boss · 机械章鱼 | 8 条独立链式触手 · idle / support / attack1-3 / laser / 两阶段 | 2 m 半径装甲球、8 片滑动虹膜壳 + 连续孔径环、红色大摄像头眼、红色能量核心与透明约束层、20 m 低空 360° 横扫 |
 
 三个工程共享同一套「暗黑舞台 + 霓虹轮廓光 + ACES/Bloom/SSAO + 扫描线暗角」
-的呈现体系，与 `../basic/actdemo`、`../basic/character` 同一画风家族。
+的呈现体系，与 `../basic/actdemo`、`hero/` 同一画风家族。
 
 ## 刀客、单轮远程机甲与折相
 
@@ -60,7 +60,7 @@ godot --headless --path . --import
 也可以拖箭头步进；改几何参数会即时重建模型并保持当前姿势。`JOINTS` 页
 可以只用单关节角度把角色摆成任意姿势，用来验证模型不是烘焙动画。
 
-**ARC // SENTINEL v2**：`1`~`8` 播放 rest / idle / walk / attack / attack_up / defend / draw / sheathe。攻击/格挡/收放由解析机械臂 IK + 碰撞感知 swivel 求解，烘焙成轨迹表（运行时 1–12 ms）；格挡强制左前 45° 用盾、右前 45° 用剑，没有 guard 兜底。一次攻击/格挡/收放不会在中途被取消，新请求排队到结束。
+**ARC // SENTINEL v3**：`1`~`5` 播放 idle / run / attack1 / attack2 / block。攻击与格挡由解析机械臂 IK + 碰撞感知 swivel 求解，逐帧审计；block 的架式按威胁方向现场规划（11–20 ms，缓存后 0）。一次攻击/格挡不会中途取消，新请求排队到结束。
 
 **SHARD // PHANTOM**：`1`~`5` 播放动画，`B` 闪烁（默认 5m）、`N` 散布后
 自动重组、`M` 立即重组、`G` 切换「被注视即爆散」。角色顶部还有
@@ -68,51 +68,50 @@ BLINK / DISPENSE / REFORM 按钮与状态读数。
 
 ---
 
-## ARC // SENTINEL v2
+## ARC // SENTINEL v3
 
 ### 设定
 
-双轮平衡机兵：左右各一枚**实心金属轮**（无辐条），轮外整圈金属胎纹甲片；两轮各自通过
-独立摆臂 + 弹簧减震与小型中央底盘相连，轴心始终贴地。机身是前后轴向的小圆柱压力壳：
-正面是大摄像头镜头（角色唯一的“脸”），背面有外凸弧形检修罩 + 盾牌挂钩，左侧有刀鞘，
-没有头。两只长臂各由**三个球状关节**（肩/肘/腕）串成；左腕末端是盾牌挂架，右腕末端是
-很短的**电弧发生器头**（无刀柄），直接生成电弧刀。整体黑 + 橙红金属。
+**两条钝角三角履带夹着中间的立方体炮塔**，从立方体正上方伸出**一条**
+三关节机械臂。只保留旧版的两个识别点：电弧闪电剑、正面红色摄像头。
 
-### 动作 / 求解器
+- 履带：底边 1.0 m、高 0.394 m，顶角约 103°（钝角）；每侧 44 块独立
+  履带板（黑色阳极氧化钢 + 两条防滑筋 + 铆钉，每 6 块一块橙色标记板）、
+  开放式三角桁架、三个带辐条的角轮、后部张紧器、橡胶内衬。
+- 身体：0.52 m 倒角立方体，底部炮塔环 + 固定腰柱；正面红色摄像头
+  光学窗口半径 **0.173 m = 边长/3**，内部红色光球会旋转指向观察者，
+  外部镜圈/玻璃罩**固定不转**；大眼下方 6 颗绿/橙/蓝状态灯独立闪烁；
+  侧面散热槽与橙色装甲缝、背面电池包与电量条。
+- 手臂：根部球关节 → 段 1（0.46 m）→ 肘球 → 段 2（0.40 m）→ 腕球 →
+  全黑发射器 → 1.03 m 电弧剑。无刀鞘、无盾牌。
+- 身高 **1.56 m**（到肩部球关节顶，不含机械臂）；履带外缘总宽 1.15 m。
 
-- `rest`：刀在左鞘内（发生器入鞘、刃关闭），盾挂在背后，躯干向刀鞘侧扭转，手臂低位收拢。
-- `idle` / `walk`：低位持刀盾；walk 是双轮滚动步态（一轮/周期、悬挂起伏、身体前倾）。
-- `attack`：左上 → 右下过顶斜劈。起手刀刃与竖直轴 30.46°、后仰、离矢状面仅 5.74°，
-  刀举到左肩上方；末位置在身体右侧，刀刃向下 46.09°。
-- `attack_up`：左下 → 右上撩斩。起手刀刃水平向后 (0,0,−1)，整把刀都在机身左侧
-  （min x 0.497 m）；末位置手臂水平向前偏右 4.80°（离水平 1.72°），刀刃向右上 44.93°。
-- `defend`：**没有 guard 兜底**。左前 45° 威胁必须用盾（盾面正对威胁线，miss 0.000 m）；
-  右前 45° 威胁必须用剑（刀身横切威胁线，miss 0.000 m）。
-- `draw` / `sheathe`：rest↔idle 的收放过渡；刀只有在完全离开刀鞘后才点亮，入鞘前先熄灭。
-- 一次动作不会在中途被取消：攻击/格挡/收放期间的新请求会排队，结束后再切；rest↔drawn
-  只通过 draw/sheathe 连接。这样任何转场都不会把剑挥穿机身。
+### 动作
 
-关节运动由解析双骨 IK + 自由 swivel 角求解，肘部同时分担前臂扭转，所有关节以四元数
-存储/插值（不会出现欧拉角翻转）。攻击/收放/格挡的笛卡尔关键目标被采样、碰撞修复、平滑，
-再按 13.5 rad/s 的关节速度上限做局部时间重参数化，最后烘焙成
-`data/arc_traj_v2.json`（约 0.7 MB，远低于 50 MB 预算）。运行时报告：attack 1 ms、
-attack_up 1 ms、block ≤12 ms；离线 bake 约 20 s，是构建步骤不是帧成本。
-idle/walk/rest 实时求解。
+| clip | 长度 | 内容 |
+| --- | --- | --- |
+| `idle` | 3.20 s | 刀平举、略上翘指向前方，胳膊折叠；伺服呼吸、履带微动、光球追踪观察者 |
+| `run` | 0.72 s | 履带每周期正好滚一圈（车轮 4 整圈，循环无接缝），车身前倾 + 颠簸 |
+| `attack1` | ~1.07 s | 正上方重砍：举到头顶（刀尖 2.81 m）→ 过顶下劈 → 刀尖落到身前 0.57 m 高 |
+| `attack2` | ~1.16 s | 横扫：右后方 → 掠过正面 → 左后方，刀尖方位扫过约 479°，刀身保持水平 |
+| `block` | 0.88 s | 路径规划的剑面格挡：刀身横切威胁射线、刀面正对来袭方向 |
+
+所有单次动作从 idle 基准姿势出发、结尾混回同一姿势；一个动作不会中途取消。
+block 的威胁方向改变时会现场规划：候选拦截位姿 → 解析 swivel IK →
+全身审计 → 32 Hz 轨迹逐帧审计。首次规划实测 **11–20 ms**（8 个方向，
+中位 ~15 ms），缓存后 0 ms；因此**不预烘焙**（v2 的 0.7 MB 轨迹表已删除）。
+规划架式实测：威胁射线到刀身距离 0.0000 m、刀面误差 0.0°、整段最小净空 ≥ 0.043 m。
 
 ### 验收
 
-`godot --headless --path . res://scenes/qa.tscn` → **PASS（0 failures）**：
+`cd arc_sentinel && godot --headless --path . res://scenes/qa.tscn` → **PASS（0 failures）**：
+5 个 clip 逐帧自碰撞 + 地面、全部可达转场、attack1/attack2 姿态与扫掠角、
+8 个威胁方向的 block（命中 / 刀面 / 净空 / 规划耗时）、光球追踪 0.00°、
+外壳不转、履带周期与履带板运动、炮塔-履带间隙、6 颗状态灯闪烁。
+逐项数字在 `arc_sentinel/renders/v3/qa_report.json`。
 
-- 所有 clip 逐帧自碰撞：rest +0.0244 / idle +0.0285 / walk +0.0217 / attack +0.0271 /
-  attack_up +0.0088 / defend +0.0130 / draw +0.0265 / sheathe +0.0308 m；地面 ≥0。
-- 状态机可达转场最差 +0.0287 m。
-- 两个强制格挡均命中；盾/剑分别使用；无 guard。
-- 攻击/攻击_up 精确约束、求解时间、关节速度全部通过。
-- 金属：程序化 PBR 金属 shader（拉丝、粗糙度破碎、稀疏划痕、点蚀、边缘磨损）+ SSR/反射探针；
-  最终图在 `renders/v2/`，动作分解帧在 `renders/v2/sheets/`。
-
-详细参数、动作表、已知限制和复现命令见 **`arc_sentinel/README.md`** 与
-**`arc_sentinel/DESIGN.md`**。
+视觉：`DISPLAY=:10 godot --path . res://scenes/v3_details.tscn` 与
+`res://scenes/v3_shots.tscn`，输出在 `arc_sentinel/renders/v3/`。
 
 ## SHARD // PHANTOM
 
@@ -156,26 +155,31 @@ idle/walk/rest 实时求解。
 
 机械章鱼最终 Boss：2 m 半径装甲球（直径 4 m）+ 8 条独立链式触手。每条触手由
 **0.30 m 连杆 + 0.31 m 球形关节**交替组成（0.60 m 一个周期），细、等粗、无吸盘；
-球形关节是可见的旋转节点。触手角色由调度器每 2 s 随机重排两条：同时至多 2 条
-attack、至多 5 条 support、其余 idle。0 条 support 时球体落地，3 条以上撑起；
-support 脚点固定，身体做 1.2 m 圆周漂移时长度变化 0.52%、脚点滑移 0.000 m。
+球形关节是可见的旋转节点。idle 长度 **15 m**；关节图案以末端为基准，长度变化时
+新链节从球内孔洞伸出/缩回，球外没有任何被压缩的超长节。球心默认在 **6.0 m**，
+触点从 52° 下倾的孔洞沿轴线伸出 0.88 m 后再弯曲，不会从孔上方穿模。
 
+- 角色规则：同时至多 2 条 attack、至多 5 条 support；**存活 ≥3 时至少保持 3 条
+  support**（被砍掉会立刻由 idle 补位）。存活 **<3** 时球体落到地面（2.22 m），
+  所有剩余触手持续攻击；不再有“少于 3 条不能砍”的限制。
 - 眼睛：球壳内的红色大摄像头镜头，万向节自由跟踪；一阶段只从 36.3° 孔径露出，
   二阶段 8 片虹膜滑入后壳、孔径 100°、红色能量球点亮、外壁透明、可发射激光。
-- 攻击：attack1 沿“当前端点→目标”的冻结直线直刺；attack2 先到目标上方 5.4 m
-  再垂直下刺；attack3 以 15 m 触手做 140°、9–10.8 m 的横扫，并以下刺收尾命中目标。
+- 攻击：attack1 先把末端对准目标再加速直刺、穿过目标后减速（预瞄准 dot 0.990+）；
+  attack2 先到目标上方 5.5 m、垂直向下加速穿过胸口；attack3 把 **20 m** 触手的
+  整段远端放低到 **1.0 m**，绕身体 **360°** 横扫，与其他腿完全独立。
+- 切割：从尖端开始逐节爆炸（火花/碎片/短暂闪光/白热断口），一路烧到根部后消失；
+  爆炸池全部会自行过期，不会在旧根部留下持久特效。
 - 验收：`cd boss && godot --headless --path . res://scenes/qa.tscn` →
-  **46/46 PASS**，0 failures；idle 互穿间隙最小 +0.482 m，support +0.509 m，
-  attack 命中 0.0023 m / <0.001 m / 0.000 m，激光端点命中，模拟 3.56 ms/60 Hz step。
-- 视觉验收：连续帧（0.13–0.25 s/帧）与接触表在 `boss/renders/shots/`、
-  `boss/renders/sheets/`，供直接审阅；最终视觉判定由用户自审。
+  **61/61 PASS**，0 failures；idle 互穿间隙 +0.706 m，support +1.051 m，
+  attack3 357.8°/21.4 m/1.0 m，support 补位与坠落攻击、cut 顺序/无残留均通过，
+  模拟 8.2 ms/60 Hz step。
+- 视觉验收：直接运行主程序（`cd boss && ./run.sh`）用右侧面板操作；本构建
+  不再生成/附带成堆的验收图片。
 
 ```bash
 cd boss
 godot --headless --path . --import
 godot --headless --path . res://scenes/qa.tscn
-DISPLAY=:10 godot --path . res://scenes/shots.tscn
-python3 compose_sheets.py
 ```
 
 ## 验收结论
@@ -185,19 +189,19 @@ python3 compose_sheets.py
 极值重建、无外部资源、性能、UI 功能与截图。审计发现的问题已按优先级修复，
 并做了二次复测：
 
-- Sentinel v2：双轮平衡机全新建模/绑定/动画；全部 clip 逐帧自碰撞为正（最低 +0.0088 m），
-  地面 ≥0；状态机可达转场最差 +0.0287 m；攻击/攻击_up 精确约束（30.46°/5.74°、
-  46.09° 右下；水平向后全左侧、末位置 0.57° 水平 / 3.00° 右 / 44.93° 右上）全部通过；
-  两个强制格挡 miss 0.000 m；解析 IK + 四元数 + 烘焙轨迹表，运行时 attack 1 ms /
-  attack_up 1 ms / block ≤12 ms。旧的 41 关节双足、guard 兜底、剑挡正面等失败项已被替换。
+- Sentinel v3：全量重做（三角履带炮塔 + 单臂 + 可旋转内球光学 + 状态灯）；
+  5 个 clip 逐帧自碰撞为正，全部可达转场为正；attack1 正上方重砍 / attack2 横扫
+  姿态与 479° 扫掠角通过；8 个威胁方向 block 命中误差 0.0000 m、刀面 0.0°、
+  净空 ≥0.043 m、首次规划 11–20 ms；光球追踪 0.00°、外壳逐姿势零变换；
+  履带每周期一圈 / 车轮 4 整圈 / 履带板确实运动；身高 1.558 m、光学半径 = 边长/3；
+  旧版双轮、盾、刀鞘、guard 兜底与烘焙轨迹表全部移除。
 - Shard：`module_size`/`module_gap`/`thruster_intensity` 死参数 → 实测生效；
   掌心永久橙色方块 → 球形充能、非攻击隐藏；笑脸面罩 → 单个大型相机镜头；
   肩/手穿插 → 手间距 0.08m；50 模块覆盖不足 → 下限 60 并自动放大模块；
   loop 接缝 8mm → 0.000m；手里剑 clip 后冻结 → 继续飞行并自清。
 
-**LEVIATHAN** 的验收数字、连续帧与已知限制见 `boss/README.md`、
-`boss/DESIGN.md`、`boss/renders/qa_report.json`，连续帧在
-`boss/renders/shots/`、接触表在 `boss/renders/sheets/`。
+**LEVIATHAN** 的验收数字与已知限制见 `boss/README.md`、`boss/DESIGN.md`、
+`boss/renders/qa_report.json`；视觉验收直接运行主程序。
 
 **定位**：按独立游戏/中型项目可用的风格化角色标准交付；工程结构、确定性、
 参数化、性能与动作可读性达标。视觉上是硬表面 + 程序化微表面（划痕/色差/
@@ -209,14 +213,12 @@ python3 compose_sheets.py
 
 ## 已知限制（诚实清单）
 
-**ARC // SENTINEL v2**
-- 摄像头 pod 在攻击时缩回机身（正面装甲虹膜关闭）是刻意设计；如果保持伸出，过顶/横跨
-  刀路会穿过它。
-- 攻击 clip 有意做得有重量感（2.1–2.2 s，含预备/跟随/回位），不是游戏化的极速快挥。
-- 烘焙表绑定默认几何签名；改 hull/wheel/shield/blade 尺寸会回退到运行时求解，首次重建
-  需要数秒而不是毫秒。
-- 格挡演示图里的敌方刀是 HDR 自发光示意道具；真正的格挡证明是 QA 的射线/圆盘/线段测试。
-- 盾是加色硬光场（unshaded），不是金属板；盾缘和骨架是金属。这是既定盾牌样式。
+**ARC // SENTINEL v3**
+- 身高 1.56 m 量到肩部球关节顶（不含机械臂）；手臂全举时整体约 2.8 m。
+- 炮塔相对底盘只能偏转 ±8°（立方体夹在两履带之间）；更大转向由整机 root_yaw 完成。
+- 光学窗口做到边长 1/3 后，红色球冠会突出正面约 6 cm，无法同时满足「突出很小」。
+- 攻击动作有重量感（1.07–1.16 s），不是极速快挥。
+- block 首次规划 11–20 ms；按需调用，不逐帧规划；同一方向缓存后 0 ms。
 - 金属细节是程序化风格化硬表面，不是扫描级 3A 贴图。
 - 进程退出时 Godot 报少量生成纹理 RID 泄漏；运行中无影响。
 
@@ -235,31 +237,24 @@ python3 compose_sheets.py
 ```text
 boss/
   scenes/studio.tscn          交互演示主场景（8 条触手、角色调度、两阶段、激光）
-  scenes/qa.tscn              全量验收（46 项）
-  scenes/shots.tscn           确定性连续帧序列
+  scenes/qa.tscn              全量验收（61 项）
   scripts/boss/               骨架、虹膜壳、万向节眼、能量核心、链式触手求解器
-  scripts/qa.gd               头less 验收
-  scripts/shots.gd            渲染序列
-  shaders/                    金属、镜头、壳玻璃、等离子球/核心、激光、地面
-  renders/qa_report.json      46/46 PASS
-  renders/sheets/             接触表
-  renders/shots/              227 张全分辨率连续帧
-  renders/shots/MANIFEST.txt  最终渲染集时间戳/帧数清单
+  scripts/qa.gd               无头验收
+  shaders/                    金属、镜头、壳玻璃、等离子球/核心、激光、地面、3D 火焰/烟雾
+  renders/qa_report.json      61/61 PASS
   README.md / DESIGN.md
 
 arc_sentinel/
   scenes/studio.tscn          交互演示主场景
   scenes/character.tscn       角色（契约接口）
-  scenes/qa.tscn              全量验收 QA（碰撞/转场/精确姿态/格挡/求解时间）
-  scenes/v2_shots.tscn        动作分解帧（960×540，16 帧 ×4 视角 ×9 clip）
-  scenes/v2_details.tscn      全身图 + 金属/镜头/轮/盾/刀特写
-  scenes/block_demo.tscn      左/右 45° 格挡图
-  scripts/ch/                 骨架/几何、解析 IK、动画、材质、电弧刀
-  scripts/bake_traj.gd        轨迹表离线烘焙
+  scenes/qa.tscn              全量验收 QA（碰撞/转场/姿态/规划/光学/履带/灯）
+  scenes/v3_shots.tscn        动作分解帧（960×540，16 帧 ×4 视角 ×5 clip）
+  scenes/v3_details.tscn      全身图 + 光球/履带/关节/刀柄特写
+  scenes/perf_v3.tscn         帧率/绘制统计探针
+  scripts/ch/                 骨架/几何、解析 IK、动画/规划、材质、电弧刀
   scripts/kit/                共享网格/材质/面板/演播室
-  shaders/                    金属、镜头、盾、电弧、地面、调色
-  data/arc_traj_v2.json       烘焙轨迹表（约 0.7 MB）
-  renders/v2/                 最终图、分解帧、格挡图、QA 报告
+  shaders/                    金属、光球、镜片玻璃、电弧、拖尾、地面、调色
+  renders/v3/                 最终图、特写、分解帧、QA 报告
   README.md / DESIGN.md
 
 shard_phantom/
@@ -274,13 +269,11 @@ shard_phantom/
 ### 生成与验收命令
 
 ```bash
-# Sentinel v2
+# Sentinel v3
 cd arc_sentinel
 godot --headless --path . res://scenes/qa.tscn
-godot --headless --path . --script res://scripts/bake_traj.gd
-DISPLAY=:10 godot --path . res://scenes/v2_shots.tscn
-DISPLAY=:10 godot --path . res://scenes/v2_details.tscn
-DISPLAY=:10 godot --path . res://scenes/block_demo.tscn
+DISPLAY=:10 godot --path . res://scenes/v3_shots.tscn
+DISPLAY=:10 godot --path . res://scenes/v3_details.tscn
 
 # Shard
 cd shard_phantom
@@ -294,13 +287,13 @@ DISPLAY=:10 godot --path . res://scenes/shots.tscn
 
 ## 实现与调度记录
 
-- `arc_sentinel` v2 为**全量重做**：新骨架、几何、材质、解析 IK、四元数轨迹、
-  碰撞审计、烘焙表、QA、动作分解帧和视觉验收全部在 `arc_sentinel/` 内，
-  详细记录见 `arc_sentinel/IMPLEMENTATION.md`、`README.md`、`DESIGN.md`。
-- 两个独立资产 subagent（`dawnfm/deepseek-v4.1-flash-1017`，variant `max`）：
-  一个产出程序化金属 shader，一个移植 `weapon_electricity_sword` 的电弧场/
-  电弧 ribbon 并验证刀刃长度；主会话负责集成、调参和验收。
-- 视觉能力 subagent 先做能力自测，再对最终动作分解帧做独立视觉验收；
-  `renders/v2/VISION_REVIEW.md` 记录其逐 clip 结论。
-- 旧版 `arc_sentinel` 的双足 41 关节、guard 兜底、剑挡正面、脚底穿地等失败项
-  已不再存在于交付代码/场景中；旧渲染已清理，最终图只在 `arc_sentinel/renders/v2/`。
+- `arc_sentinel` v3 为**全量重做**：新骨架（双三角履带 + 立方体炮塔 + 单臂）、
+  几何、材质、解析 IK、四元数轨迹、运行时 block 规划、QA 与视觉验收全部在
+  `arc_sentinel/` 内，详细记录见 `arc_sentinel/README.md` 与 `arc_sentinel/DESIGN.md`。
+- 本次按用户反馈调整比例：身高 1.56 m（不含臂）、履带改为钝角三角形并重做金属
+  履带板细节、立方体缩小而光学窗口放大到边长 1/3、剑柄改全黑、眼下加 6 颗
+  绿/橙/蓝闪烁状态灯。
+- v3 的几何、绑定、动作、规划、验收与渲染均在本会话内完成；沿用 v2 已移植的
+  电弧剑场与程序化金属 shader。
+- 视觉验收：`renders/v3/` 下为最终图、特写与逐帧动作分解；旧 `renders/v2/` 已清理，
+  旧 v2 的烘焙轨迹表、盾、刀鞘代码全部删除。

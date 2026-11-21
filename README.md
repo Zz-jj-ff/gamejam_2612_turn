@@ -16,14 +16,15 @@
 | 目录 | 项目 | 一句话 |
 | --- | --- | --- |
 | `basic/actdemo/` | ACT // 四足刀客 | 四足机甲、武士刀、赛博朋克巷战的动作 demo，「看见就打不到 / 看见就会死」的视线博弈 |
-| `basic/character/` | T4 // VESPER | 程序化四足高速 ACT 主角：4 次中心对称的噬菌体式机械腿 + 人形战斗底盘 + 一把激光大剑 |
+
 | `basic/mapbuilder/` | 程序化地图/场景探索 | 3 个任务（赛博城市 / 自然地形 / 宇宙飞船）× 3 个模型的 9 个独立交付，初稿冻结在 `_baseline/` |
 
 ## character_design
 
 | 目录 | 角色 | 定位 |
 | --- | --- | --- |
-| `character_design/arc_sentinel/` | ARC // SENTINEL v2 | 基础近战敌人 · 双轮平衡机兵 |
+| `character_design/hero/` | VESPER // VX-02 | 程序化四足高速 ACT 主角：4 次中心对称的噬菌体式机械腿 + 人形战斗底盘 + 激光大剑 |
+| `character_design/arc_sentinel/` | ARC // SENTINEL v3 | 普通近战小怪 · 三角履带炮塔 |
 | `character_design/shard_phantom/` | SHARD // PHANTOM | 位移敌人 · 模块化悬浮人形 |
 | `character_design/boss/` | LEVIATHAN // ABYSSAL WARDEN | 最终 Boss · 机械章鱼 |
 | `character_design/girl_head/` | 少女头部 | 程序化头部/发型建模与材质实验 |
@@ -31,7 +32,7 @@
 | `character_design/_kit_template/` | 套件模板 | 新建角色工程的共享骨架 |
 
 三个敌人工程共享同一套「暗黑舞台 + 霓虹轮廓光 + ACES/Bloom/SSAO + 扫描线暗角」
-的呈现体系，与 `basic/actdemo`、`basic/character` 同一画风家族。
+的呈现体系，与 `basic/actdemo`、`character_design/hero` 同一画风家族。
 
 ## 运行
 
@@ -39,7 +40,7 @@
 
 ```bash
 cd basic/actdemo    && ./run.sh                 # 游戏本体
-cd basic/character  && ./run.sh                 # 展示循环，按任意移动/攻击键接管
+cd character_design/hero && ./run.sh            # 展示循环，按任意移动/攻击键接管
 cd basic/mapbuilder/t3_spaceship/ds41-1017-max && ./run.sh   # 任选一格，9 格都是独立工程
 
 cd character_design/arc_sentinel  && ./run.sh
