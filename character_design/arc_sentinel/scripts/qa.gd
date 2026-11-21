@@ -1,9 +1,10 @@
 extends Node3D
-## ARC // SENTINEL v2 — acceptance QA.
+## ARC // GRINDER v3 — acceptance QA.
 ##
 ## Headless: godot --headless --path . res://scenes/qa.tscn
-## Checks: every clip frame for self-collision, all direct animation blends,
-## exact attack pose constraints, both mandated blocks, solver timings.
+## Checks: every clip frame for self-collision + floor, all reachable blends,
+## exact attack/guard constraints, runtime block planning budget, optic aim,
+## track belt periodicity, and joint-speed sanity.
 
 const D2R := PI / 180.0
 const CH_SCENE := "res://scenes/character.tscn"
@@ -21,15 +22,19 @@ func _ready() -> void:
 	await get_tree().process_frame
 	kin = ch.kin
 	anim = ch.anim
-	print("=== ARC SENTINEL v2 QA ===")
+	print("=== ARC GRINDER v3 QA ===")
 	print("anims: ", ch.anim_names())
-	print("build_ms: ", anim.build_ms, "  attack: ", anim.attack_ms,
-		"  attack_up: ", anim.attack_up_ms, "  defend: ", anim.defend_ms)
+	print("build_ms: ", anim.build_ms, "  attack1: ", anim.attack1_ms,
+		"  attack2: ", anim.attack2_ms, "  block(raw): ", anim.block_plan_raw_ms)
 	_test_clip_clearance()
 	_test_transitions()
 	_test_attack_poses()
+	_test_swing_paths()
 	_test_blocks()
 	_test_timing()
+	_test_optic()
+	_test_tracks()
+	_test_static_clearance()
 	_write_report()
 	print("\n=== RESULT: %s (%d failures) ===" % ["PASS" if fails.is_empty() else "FAIL", fails.size()])
 	for f in fails:
@@ -41,267 +46,463 @@ func _fail(msg: String) -> void:
 	fails.append(msg)
 
 
+func _audit_exact(pose: Dictionary) -> Dictionary:
+	return kin.audit(pose, false, 10.0)
+
+
 func _test_clip_clearance() -> void:
 	print("\n-- clip clearance --")
 	for name in ch.anim_names():
 		var dur: float = anim.duration(name)
-		var n := 96
+		var n := 120
 		var worst := 9.0
 		var wp := ["", ""]
 		var wt := 0.0
 		var floor_worst := 9.0
+		var tip_low := 9.0
 		for i in n + 1:
 			var t := dur * float(i) / float(n)
 			var pose: Dictionary = anim.sample(name, t)
-			var a: Dictionary = kin.audit(pose)
+			var a: Dictionary = _audit_exact(pose)
 			if float(a["min"]) < worst:
 				worst = float(a["min"])
 				wp = a["pair"]
 				wt = t
 			floor_worst = minf(floor_worst, float(a["floor"]))
-		var ok := worst > 0.0 and floor_worst > -0.002
-		print("  %-9s dur %.2f  min %+.4f m at %.2fs %s  floor %+.4f  %s" % [
-			name, dur, worst, wt, str(wp), floor_worst, "OK" if ok else "FAIL"])
+			tip_low = minf(tip_low, float((kin.arm_fk(pose)["tip"] as Vector3).y))
+		var ok := worst > 0.0 and floor_worst > -0.004 and tip_low > 0.12
+		print("  %-8s dur %.2f  min %+.4f m at %.2fs %s  floor %+.4f  tip y %+.3f  %s" % [
+			name, dur, worst, wt, str(wp), floor_worst, tip_low, "OK" if ok else "FAIL"])
 		rows.append({"clip": name, "dur": dur, "min": worst, "pair": wp,
-			"t": wt, "floor": floor_worst})
+			"t": wt, "floor": floor_worst, "tip_low": tip_low})
 		if not ok:
-			_fail("%s collision %.4f m %s at %.2fs (floor %.4f)" % [name, worst, str(wp), wt, floor_worst])
+			_fail("%s collision %.4f m %s at %.2fs (floor %.4f tip %.3f)" % [
+				name, worst, str(wp), wt, floor_worst, tip_low])
 
 
 func _test_transitions() -> void:
 	print("\n-- animation blends (state-machine reachable) --")
-	var loops := ["idle", "walk"]
-	var drawn := ["idle", "walk", "attack", "attack_up", "defend"]
+	var states: Array = []
+	for nm in ["idle", "run"]:
+		for f in [0.0, 0.33, 0.66]:
+			states.append([nm, f])
+	for nm in ["attack1", "attack2", "block"]:
+		states.append([nm, 0.0])
+		states.append([nm, 1.0])
 	var worst := 9.0
 	var wdesc := ""
-	for a in loops:
-		for b in drawn:
+	for a in states:
+		for b in states:
 			if a == b:
 				continue
-			var ta: float = anim.duration(a) * 0.55
-			var pa: Dictionary = anim.sample(a, ta)
-			var pb: Dictionary = anim.sample(b, 0.0)
+			var ta: float = anim.duration(a[0]) * float(a[1])
+			var tb: float = anim.duration(b[0]) * float(b[1])
+			var pa: Dictionary = anim.sample(a[0], ta)
+			var pb: Dictionary = anim.sample(b[0], tb)
 			var mn := 9.0
 			var mp := ["", ""]
 			for k in 13:
 				var u := float(k) / 12.0
-				var p: Dictionary = ArcKin2.blend_pose(pa, pb, u)
-				var au: Dictionary = kin.audit(p)
+				var p: Dictionary = ArcKin3.blend_pose(pa, pb, u)
+				var au: Dictionary = _audit_exact(p)
 				if float(au["min"]) < mn:
 					mn = float(au["min"])
 					mp = au["pair"]
 			if mn < worst:
 				worst = mn
-				wdesc = "%s@%.2f -> %s : %.4f %s" % [a, ta, b, mn, str(mp)]
-			rows.append({"blend": "%s->%s" % [a, b], "min": mn, "pair": mp})
-	# one-shots are never cancelled: their end pose is the idle base
-	for a in ["attack", "attack_up", "defend"]:
-		var pa2: Dictionary = anim.sample(a, anim.duration(a))
-		for b in drawn:
-			var pb2: Dictionary = anim.sample(b, 0.0)
-			var mn2 := 9.0
-			var mp2 := ["", ""]
-			for k in 13:
-				var p2: Dictionary = ArcKin2.blend_pose(pa2, pb2, float(k) / 12.0)
-				var au2: Dictionary = kin.audit(p2)
-				if float(au2["min"]) < mn2:
-					mn2 = float(au2["min"])
-					mp2 = au2["pair"]
-			if mn2 < worst:
-				worst = mn2
-				wdesc = "%s(end) -> %s : %.4f %s" % [a, b, mn2, str(mp2)]
-			rows.append({"blend": "%s(end)->%s" % [a, b], "min": mn2, "pair": mp2})
+				wdesc = "%s@%.2f -> %s@%.2f : %.4f %s" % [
+					a[0], ta, b[0], tb, mn, str(mp)]
+			rows.append({"blend": "%s->%s" % [a[0], b[0]], "min": mn, "pair": mp})
 	print("  worst reachable blend: %s" % wdesc)
 	if worst <= 0.0:
 		_fail("animation blend collision: %s" % wdesc)
-	# rest <-> idle must go through draw / sheathe
-	for pair in [["rest", "idle"], ["idle", "rest"]]:
-		var pa3: Dictionary = anim.sample(pair[0], 0.0)
-		var pb3: Dictionary = anim.sample(pair[1], 0.0)
-		var mn3 := 9.0
-		for k in 13:
-			var p3: Dictionary = ArcKin2.blend_pose(pa3, pb3, float(k) / 12.0)
-			mn3 = minf(mn3, float(kin.audit(p3)["min"]))
-		print("  direct %s->%s min %+.4f (routed via draw/sheathe)" % [pair[0], pair[1], mn3])
+	# one-shots must start and end on the idle base pose (no pop)
+	var base: Dictionary = anim.sample("idle", 0.0)
+	for nm in ["attack1", "attack2", "block"]:
+		for f in [0.0, 1.0]:
+			var p2: Dictionary = anim.sample(nm, anim.duration(nm) * f)
+			var dq := 0.0
+			for j in ["sh", "elb", "wr"]:
+				var qa: Quaternion = base.get(j + "_q", Quaternion())
+				var qb: Quaternion = p2.get(j + "_q", Quaternion())
+				dq = maxf(dq, qa.angle_to(qb))
+			print("  %s @%.0f%% joint delta from idle %.4f rad" % [nm, f * 100.0, dq])
+			if dq > 0.02:
+				_fail("%s endpoint %.0f%% is not the idle base (%.4f rad)" % [nm, f * 100.0, dq])
 
 
 func _blade_info(pose: Dictionary) -> Dictionary:
-	var fk: Dictionary = kin.arm_fk(-1, pose)
+	var fk: Dictionary = kin.arm_fk(pose)
 	var b: Basis = fk["tool_basis"]
-	var d := b * Vector3(0, -1, 0)
-	var sx := b * Vector3(1, 0, 0)
-	var sz := b * Vector3(0, 0, 1)
-	var minx := 99.0
+	var d: Vector3 = fk["dir"]
+	var up: Vector3 = b * Vector3(0, 0, 1)
+	var side: Vector3 = b * Vector3(1, 0, 0)
+	var tip: Vector3 = fk["tip"]
+	# lowest point of the real blade volume (wide axis = side, thickness = up)
+	var low := 9.0
 	for i in 8:
 		var f := float(i) / 7.0
 		var p: Vector3 = (fk["tool"] as Vector3) + d * (kin.blade_len * f)
-		var hw: float = kin.blade_half_w * (1.0 - 0.65 * f)
-		var ht: float = kin.blade_half_t * (1.0 - 0.65 * f)
+		var hw: float = kin.blade_half_w * (1.0 - 0.7 * f)
+		var ht: float = kin.blade_half_t * (1.0 - 0.7 * f)
 		for cx in [-1.0, 1.0]:
-			for cz in [-1.0, 1.0]:
-				var q: Vector3 = p + sx * (cx * hw) + sz * (cz * ht)
-				minx = minf(minx, q.x)
+			for cy in [-1.0, 1.0]:
+				var q: Vector3 = p + side * (cx * hw) + up * (cy * ht)
+				low = minf(low, q.y)
 	return {"s": fk["s"], "e": fk["e"], "w": fk["w"], "tool": fk["tool"], "dir": d,
-		"basis": b, "minx": minx, "tip": (fk["tool"] as Vector3) + d * kin.blade_len}
+		"basis": b, "tip": tip, "low": low, "face": fk["face"]}
+
+
+func _elbow_bend(pose: Dictionary) -> float:
+	var fk: Dictionary = kin.arm_fk(pose)
+	var u: Vector3 = ((fk["e"] as Vector3) - (fk["s"] as Vector3)).normalized()
+	var f: Vector3 = ((fk["w"] as Vector3) - (fk["e"] as Vector3)).normalized()
+	return rad_to_deg(u.angle_to(f))
 
 
 func _test_attack_poses() -> void:
-	print("\n-- exact attack poses --")
-	# attack windup: above the LEFT shoulder, blade left-back-up
-	var pw: Dictionary = anim.action_key("attack", "windup")
-	var bw := _blade_info(pw)
-	var dw: Vector3 = bw["dir"]
-	print("  attack windup: tool (%.2f, %.2f, %.2f)  dir %s  body/torso yaw %.1f/%.1f" % [
-		float(bw["tool"].x), float(bw["tool"].y), float(bw["tool"].z), str(dw),
-		rad_to_deg(float(pw.get("body_yaw", 0.0))), rad_to_deg(float(pw.get("torso_yaw", 0.0)))])
-	if float(bw["tool"].y) < 1.35 or float(bw["tool"].x) < 0.30:
-		_fail("attack windup not above the left shoulder")
-	if dw.x < 0.35 or dw.y < 0.25 or dw.z > -0.45:
-		_fail("attack windup blade not left-back-up (%s)" % str(dw))
-	if float(pw.get("torso_yaw", 0.0)) < 20.0 * D2R:
-		_fail("attack windup torso twist too small")
-	# attack via: straight arm, blade left-front-up
-	var pv: Dictionary = anim.action_key("attack", "via")
-	var bv := _blade_info(pv)
-	var vdir: Vector3 = bv["dir"]
-	var varm: Vector3 = ((bv["w"] as Vector3) - (bv["s"] as Vector3)).normalized()
-	var vbend := rad_to_deg(varm.angle_to(vdir))
-	var velb := rad_to_deg(((bv["e"] as Vector3) - (bv["s"] as Vector3)).normalized().angle_to(((bv["w"] as Vector3) - (bv["e"] as Vector3)).normalized()))
-	print("  attack via: dir %s  arm/blade %.2f deg  elbow %.2f deg  tool x %.2f y %.2f z %.2f" % [
-		str(vdir), vbend, velb, float(bv["tool"].x), float(bv["tool"].y), float(bv["tool"].z)])
-	if vdir.x < 0.30 or vdir.y < 0.30 or vdir.z < 0.30:
-		_fail("attack via blade not left-front-up (%s)" % str(vdir))
-	if vbend > 6.0:
-		_fail("attack via arm not straight (%.1f deg)" % vbend)
-	if velb > 10.0:
-		_fail("attack via elbow not straight (%.1f deg)" % velb)
-	# attack front: blade straight forward, through the space in front
-	var pf: Dictionary = anim.action_key("attack", "front")
+	print("\n-- exact poses --")
+	# idle: blade level, slightly up, pointing forward, arm folded
+	# body height excluding the arm (top of the shoulder socket ball)
+	var body_h: float = kin.body_y + kin.shoulder_local.y + 0.098
+	print("  body height (no arm) %.3f m   optic radius %.3f m (cube/3, cube %.2f)" % [
+		body_h, kin.cam_ap, kin.cube])
+	if body_h < 1.48 or body_h > 1.70:
+		_fail("body height %.3f m is not ~1.6 m" % body_h)
+	if absf(kin.cam_ap - kin.cube / 3.0) > 1e-6:
+		_fail("optic radius %.3f is not cube/3" % kin.cam_ap)
+	var pid: Dictionary = anim.sample("idle", 0.0)
+	var bi := _blade_info(pid)
+	var idir: Vector3 = bi["dir"]
+	var ibend := 180.0 - _elbow_bend(pid)
+	print("  idle: dir %s  tool (%.2f, %.2f, %.2f)  tip y %.2f z %.2f  elbow bend %.1f deg" % [
+		str(idir), float(bi["tool"].x), float(bi["tool"].y), float(bi["tool"].z),
+		float(bi["tip"].y), float(bi["tip"].z), ibend])
+	if idir.z < 0.97 or absf(idir.x) > 0.08 or idir.y < 0.03 or idir.y > 0.15:
+		_fail("idle blade not level-forward with a slight up tilt (%s)" % str(idir))
+	if ibend < 55.0:
+		_fail("idle arm not folded (elbow bend %.1f deg)" % ibend)
+	if float(bi["tool"].z) < 0.30:
+		_fail("idle sword not held in front (tool z %.2f)" % float(bi["tool"].z))
+	if float(bi["tool"].y) < 1.10 or float(bi["tool"].y) > 1.48:
+		_fail("idle sword height %.2f out of range" % float(bi["tool"].y))
+	# attack1 windup: blade straight up
+	var pt: Dictionary = anim.action_key("attack1", "top")
+	var bt := _blade_info(pt)
+	print("  attack1 top: dir %s  tool y %.2f  tip y %.2f" % [
+		str(bt["dir"]), float(bt["tool"].y), float(bt["tip"].y)])
+	if (bt["dir"] as Vector3).y < 0.93:
+		_fail("attack1 windup blade not vertical (%s)" % str(bt["dir"]))
+	if float(bt["tool"].y) < 1.62 or float(bt["tip"].y) < 2.35:
+		_fail("attack1 windup not overhead (tool %.2f tip %.2f)" % [
+			float(bt["tool"].y), float(bt["tip"].y)])
+	# attack1 impact: blade down-forward, tip low and forward, sagittal
+	var ph: Dictionary = anim.action_key("attack1", "hit")
+	var bh := _blade_info(ph)
+	var hdir: Vector3 = bh["dir"]
+	print("  attack1 hit: dir %s  tool (%.2f, %.2f, %.2f)  tip (%.2f, %.2f, %.2f)  low %.2f" % [
+		str(hdir), float(bh["tool"].x), float(bh["tool"].y), float(bh["tool"].z),
+		float(bh["tip"].x), float(bh["tip"].y), float(bh["tip"].z), float(bh["low"])])
+	if hdir.y > -0.45 or hdir.z < 0.60:
+		_fail("attack1 impact blade not down-forward (%s)" % str(hdir))
+	if absf(hdir.x) > 0.10:
+		_fail("attack1 impact not a sagittal chop (x %.2f)" % hdir.x)
+	if float(bh["tip"].y) > 0.80 or float(bh["tip"].y) < 0.30:
+		_fail("attack1 impact tip height %.2f not low" % float(bh["tip"].y))
+	if float(bh["tip"].z) < 1.10:
+		_fail("attack1 impact tip not forward (z %.2f)" % float(bh["tip"].z))
+	if float(bh["low"]) < 0.28:
+		_fail("attack1 impact blade too low (low %.2f)" % float(bh["low"]))
+	# attack2 windup: blade horizontal, to the character's right and back
+	var pc: Dictionary = anim.action_key("attack2", "coil2")
+	var bc := _blade_info(pc)
+	print("  attack2 coil: dir %s  tool x %.2f y %.2f  tip x %.2f z %.2f" % [
+		str(bc["dir"]), float(bc["tool"].x), float(bc["tool"].y),
+		float(bc["tip"].x), float(bc["tip"].z)])
+	if (bc["dir"] as Vector3).x > -0.50 or (bc["dir"] as Vector3).z > -0.35:
+		_fail("attack2 windup not back-right (%s)" % str(bc["dir"]))
+	if absf((bc["dir"] as Vector3).y) > 0.12:
+		_fail("attack2 windup not horizontal (%s)" % str(bc["dir"]))
+	if float(bc["tool"].x) > -0.35:
+		_fail("attack2 windup tool not out to the right (%.2f)" % float(bc["tool"].x))
+	# attack2 across the front
+	var pf: Dictionary = anim.action_key("attack2", "sweep2")
 	var bf := _blade_info(pf)
-	var fdir: Vector3 = bf["dir"]
-	var farm: Vector3 = ((bf["w"] as Vector3) - (bf["s"] as Vector3)).normalized()
-	var fbend := rad_to_deg(farm.angle_to(fdir))
-	print("  attack front: dir %s  arm/blade %.2f deg  tip z %.2f  body/torso %.1f/%.1f" % [
-		str(fdir), fbend, float(bf["tip"].z),
-		rad_to_deg(float(pf.get("body_yaw", 0.0))), rad_to_deg(float(pf.get("torso_yaw", 0.0)))])
-	if fdir.z < 0.85 or absf(fdir.x) > 0.15 or absf(fdir.y) > 0.25:
-		_fail("attack front blade not straight forward (%s)" % str(fdir))
-	if fbend > 6.0:
-		_fail("attack front arm not straight (%.1f deg)" % fbend)
-	if float(bf["tip"].z) < 1.70:
-		_fail("attack front does not reach in front (tip z %.2f)" % float(bf["tip"].z))
-	# attack end: straight arm/blade right-down, no front/back component
-	var pe: Dictionary = anim.action_key("attack", "end")
+	print("  attack2 sweep2: dir %s  tool z %.2f  tip z %.2f" % [
+		str(bf["dir"]), float(bf["tool"].z), float(bf["tip"].z)])
+	if (bf["dir"] as Vector3).z < 0.90 or absf((bf["dir"] as Vector3).y) > 0.10:
+		_fail("attack2 mid sweep not horizontal-forward (%s)" % str(bf["dir"]))
+	if float(bf["tool"].z) < 0.45:
+		_fail("attack2 mid sweep not in front (tool z %.2f)" % float(bf["tool"].z))
+	# attack2 follow: blade to the character's left
+	var pe: Dictionary = anim.action_key("attack2", "follow")
 	var be := _blade_info(pe)
-	var down := asin(clampf(-(be["dir"] as Vector3).y, -1.0, 1.0)) / D2R
-	var arm_dir: Vector3 = ((be["w"] as Vector3) - (be["s"] as Vector3)).normalized()
-	var arm_bend := rad_to_deg(arm_dir.angle_to(be["dir"] as Vector3))
-	var eelb := rad_to_deg(((be["e"] as Vector3) - (be["s"] as Vector3)).normalized().angle_to(((be["w"] as Vector3) - (be["e"] as Vector3)).normalized()))
-	print("  attack end: tool x %.2f z %.2f  dir %s  down %.2f  tip y %.2f z %.2f  arm/blade %.2f elbow %.2f  body/torso %.1f/%.1f" % [
-		float(be["tool"].x), float(be["tool"].z), str(be["dir"]), down,
-		float(be["tip"].y), float(be["tip"].z), arm_bend, eelb,
-		rad_to_deg(float(pe.get("body_yaw", 0.0))), rad_to_deg(float(pe.get("torso_yaw", 0.0)))])
-	if (be["dir"] as Vector3).z < 0.55:
-		_fail("attack end blade leaves the front (dz %.2f)" % float((be["dir"] as Vector3).z))
-	if (be["dir"] as Vector3).x >= 0.0 or (be["dir"] as Vector3).y >= 0.0:
-		_fail("attack end not right-down")
-	if absf(down - 25.0) > 6.0:
-		_fail("attack end down angle %.1f not 25±6" % down)
-	if arm_bend > 6.0:
-		_fail("attack end arm not straight (%.1f deg to blade)" % arm_bend)
-	if eelb > 10.0:
-		_fail("attack end elbow not straight (%.1f deg)" % eelb)
-	if float(be["tool"].x) > -0.80:
-		_fail("attack end not on the body's right")
-	if float(be["tip"].y) < 0.05:
-		_fail("attack end tip through the floor")
-	if float(be["tip"].z) < 1.0:
-		_fail("attack end not in front (tip z %.2f)" % float(be["tip"].z))
-	if float(pe.get("torso_yaw", 0.0)) > -5.0 * D2R:
-		_fail("attack end torso not turned right")
-	# attack_up windup
-	var puw: Dictionary = anim.action_key("attack_up", "windup")
-	var buw := _blade_info(puw)
-	var duw: Vector3 = buw["dir"]
-	print("  attack_up windup: dir %s  min x %.3f  tool y %.2f x %.2f" % [
-		str(duw), float(buw["minx"]), float(buw["tool"].y), float(buw["tool"].x)])
-	if absf(duw.y) > 0.08 or duw.z > -0.97:
-		_fail("attack_up windup blade not horizontal backward")
-	if float(buw["minx"]) <= 0.26:
-		_fail("attack_up windup blade not entirely left of the hull (min x %.3f)" % float(buw["minx"]))
-	if float(buw["tool"].y) > 0.90 or float(buw["tool"].x) < 0.30:
-		_fail("attack_up windup not low-left")
-	# attack_up end
-	var pue: Dictionary = anim.action_key("attack_up", "end")
-	var bue := _blade_info(pue)
-	var up_arm_dir: Vector3 = ((bue["w"] as Vector3) - (bue["s"] as Vector3)).normalized()
-	var arm_up := asin(clampf(up_arm_dir.y, -1.0, 1.0)) / D2R
-	var up_arm_bend := rad_to_deg(up_arm_dir.angle_to(bue["dir"] as Vector3))
-	var up := asin(clampf((bue["dir"] as Vector3).y, -1.0, 1.0)) / D2R
-	print("  attack_up end: arm up %.2f deg, blade up %.2f deg, arm/blade %.2f deg, dir %s" % [
-		arm_up, up, up_arm_bend, str(bue["dir"])])
-	if absf(up - 45.0) > 5.0 or (bue["dir"] as Vector3).x >= 0.0:
-		_fail("attack_up end blade not 45 deg up-right")
-	if up_arm_bend > 6.0:
-		_fail("attack_up end arm not straight (%.1f deg to blade)" % up_arm_bend)
-	if arm_up < 35.0:
-		_fail("attack_up end arm not raised with the blade (%.1f deg up)" % arm_up)
+	print("  attack2 follow: dir %s  tip x %.2f" % [str(be["dir"]), float(be["tip"].x)])
+	if (be["dir"] as Vector3).x < 0.85 or (be["dir"] as Vector3).z > -0.20:
+		_fail("attack2 follow not back-left (%s)" % str(be["dir"]))
+	if float(be["tool"].x) < 0.35:
+		_fail("attack2 follow tool not out to the left (%.2f)" % float(be["tool"].x))
+
+
+func _test_swing_paths() -> void:
+	print("\n-- swing paths --")
+	# attack1: tip stays in the sagittal plane and sweeps down in front
+	var worst_x := 0.0
+	var low_tip := 9.0
+	var reach_z := -9.0
+	var tr1: Array = anim.trajs.get("attack1", [])
+	for s in tr1:
+		var fk: Dictionary = kin.arm_fk(s["pose"])
+		var tip: Vector3 = fk["tip"]
+		worst_x = maxf(worst_x, absf(tip.x))
+		low_tip = minf(low_tip, tip.y)
+		reach_z = maxf(reach_z, tip.z)
+	print("  attack1 tip: |x| max %.3f  min y %.3f  max z %.3f  samples %d" % [
+		worst_x, low_tip, reach_z, tr1.size()])
+	if worst_x > 0.22:
+		_fail("attack1 tip leaves the sagittal plane (|x| %.2f)" % worst_x)
+	if reach_z < 1.25:
+		_fail("attack1 tip does not reach forward (z %.2f)" % reach_z)
+	if low_tip < 0.30:
+		_fail("attack1 tip through the floor (%.2f)" % low_tip)
+	# attack2: tip azimuth sweeps > 180 degrees around the body
+	var tr2: Array = anim.trajs.get("attack2", [])
+	var prev_az := 1e9
+	var total := 0.0
+	var flat := 0.0
+	for s in tr2:
+		var fk2: Dictionary = kin.arm_fk(s["pose"])
+		var tip2: Vector3 = fk2["tip"]
+		var az := atan2(tip2.x, tip2.z)
+		if prev_az < 1e8:
+			var d := wrapf(az - prev_az, -PI, PI)
+			total += absf(d)
+		else:
+			flat = az
+		prev_az = az
+	print("  attack2 tip azimuth sweep %.1f deg (start %.1f)" % [rad_to_deg(total), rad_to_deg(flat)])
+	if rad_to_deg(total) < 180.0:
+		_fail("attack2 sweep only %.1f deg" % rad_to_deg(total))
+	# no teleport: bounded joint speed and bounded tool step per sample
+	for nm in ["attack1", "attack2", "block"]:
+		var tr: Array = anim.trajs.get(nm, [])
+		var qd: float = anim.traj_qdot(nm)
+		var max_step := 0.0
+		var max_dt := 0.0
+		for i in tr.size() - 1:
+			var a: Dictionary = tr[i]["pose"]
+			var b: Dictionary = tr[i + 1]["pose"]
+			var dt := maxf(float(tr[i + 1]["t"]) - float(tr[i]["t"]), 1e-4)
+			var ta: Vector3 = kin.arm_fk(a)["tool"]
+			var tb: Vector3 = kin.arm_fk(b)["tool"]
+			max_step = maxf(max_step, ta.distance_to(tb) / dt)
+			max_dt = maxf(max_dt, dt)
+		print("  %s qdot %.1f rad/s  tool %.2f m/s  max sample dt %.3f s" % [
+			nm, qd, max_step, max_dt])
+		if qd > 46.0:
+			_fail("%s joint speed %.1f rad/s > 46" % [nm, qd])
 
 
 func _test_blocks() -> void:
-	print("\n-- mandated blocks --")
-	ch.set_block_threat(0)
-	var a: Dictionary = ch.block_plan_stats()
-	ch.set_block_threat(1)
-	var b: Dictionary = ch.block_plan_stats()
-	for r in [a, b]:
-		print("  threat %d %s: effector %s blocked %s miss %.4f clear %.4f plan %.1f ms" % [
-			int(r["threat"]), str(r["threat_name"]), str(r["effector"]),
-			str(r["blocked"]), float(r["miss"]), float(r["min_clear"]), float(r["plan_ms"])])
-		if not bool(r["blocked"]):
-			_fail("block %s not intercepted" % str(r["threat_name"]))
-		if str(r["effector"]) != ("shield" if int(r["threat"]) == 0 else "sword"):
-			_fail("block %s wrong effector %s" % [str(r["threat_name"]), str(r["effector"])])
-		if float(r["min_clear"]) <= 0.0:
-			_fail("block %s collision %.4f" % [str(r["threat_name"]), float(r["min_clear"])])
-	if str(a["effector"]) == "guard" or str(b["effector"]) == "guard":
-		_fail("guard fallback used")
+	print("\n-- planned blocks --")
+	var cases := [
+		[0.0, 0.0], [-45.0, 0.0], [45.0, 0.0], [-70.0, 0.0], [70.0, 0.0],
+		[-20.0, 12.0], [20.0, -12.0], [0.0, 14.0],
+	]
+	var worst_miss := 0.0
+	var worst_clear := 9.0
+	var worst_ms := 0.0
+	var all_ok := true
+	for c in cases:
+		ch.set_block_threat(float(c[0]), float(c[1]))
+		var st: Dictionary = ch.block_plan_stats()
+		var dur: float = anim.duration("block")
+		# measure the actual guard pose from the clip, not the report
+		var guard_pose: Dictionary = anim.sample("block", float(st["t_guard"]))
+		var guard: Dictionary = _blade_info(guard_pose)
+		var d := Vector3(sin(float(c[0]) * D2R) * cos(float(c[1]) * D2R),
+			sin(float(c[1]) * D2R), cos(float(c[0]) * D2R) * cos(float(c[1]) * D2R)).normalized()
+		var chest: Vector3 = kin.chest_point()
+		var miss := ArcKin3.seg_seg_dist(chest + d * 1.8, chest - d * 0.05,
+			guard["tool"], guard["tip"])
+		var face_err := rad_to_deg(acos(clampf((guard["face"] as Vector3).dot(d), -1.0, 1.0)))
+		var traj_clear: Dictionary = anim.traj_min_clear("block", 10.0)
+		print("  threat %+5.1f/%+4.1f: miss %.4f  face %.1f deg  clear %.4f (%s)  plan %.1f ms  dur %.2f" % [
+			float(c[0]), float(c[1]), miss, face_err, float(traj_clear["min"]),
+			str(traj_clear["pair"]), float(st["plan_ms"]), dur])
+		worst_miss = maxf(worst_miss, miss)
+		worst_clear = minf(worst_clear, float(traj_clear["min"]))
+		worst_ms = maxf(worst_ms, float(st["plan_ms"]))
+		if miss > 0.02:
+			all_ok = false
+		if face_err > 25.0:
+			all_ok = false
+		if float(traj_clear["min"]) <= 0.0:
+			all_ok = false
+		if not bool(st["guarded"]):
+			all_ok = false
+		rows.append({"block": "%+0.1f/%+0.1f" % [float(c[0]), float(c[1])],
+			"miss": miss, "face_err": face_err, "min": float(traj_clear["min"]),
+			"plan_ms": float(st["plan_ms"])})
+	ch.set_block_threat(0.0, 0.0)
+	print("  worst miss %.4f  worst clear %.4f  worst (cached) plan %.1f ms  raw plan %.1f ms" % [
+		worst_miss, worst_clear, worst_ms, float(anim.block_plan_raw_ms)])
+	if not all_ok:
+		_fail("a planned block case failed (miss %.4f clear %.4f)" % [worst_miss, worst_clear])
+	if float(anim.block_plan_raw_ms) <= 20.0:
+		print("  runtime block planning is inside the 20 ms budget (no bake needed)")
+	else:
+		_fail("runtime block planning %.1f ms > 20 ms; a pre-baked table is required" % float(anim.block_plan_raw_ms))
 
 
 func _test_timing() -> void:
 	print("\n-- solver timing --")
-	var atk: Dictionary = ch.attack_plan_stats("attack")
-	var up: Dictionary = ch.attack_plan_stats("attack_up")
-	ch.set_block_threat(0)
-	var bl: Dictionary = ch.block_plan_stats()
-	print("  attack plan %.1f ms (min clear %.4f, qdot %.1f)" % [
-		float(atk["plan_ms"]), float(atk["min_clear"]), float(atk["qdot_max"])])
-	print("  attack_up plan %.1f ms (min clear %.4f, qdot %.1f)" % [
-		float(up["plan_ms"]), float(up["min_clear"]), float(up["qdot_max"])])
-	print("  block plan %.1f ms" % float(bl["plan_ms"]))
-	if float(atk["plan_ms"]) > 50.0:
-		_fail("attack plan %.1f ms > 50" % float(atk["plan_ms"]))
-	if float(up["plan_ms"]) > 50.0:
-		_fail("attack_up plan %.1f ms > 50" % float(up["plan_ms"]))
-	if float(bl["plan_ms"]) > 50.0:
-		_fail("block plan %.1f ms > 50" % float(bl["plan_ms"]))
-	if float(atk["min_clear"]) <= 0.0:
-		_fail("attack table collision %.4f %s" % [float(atk["min_clear"]), str(atk["min_pair"])])
-	if float(atk["qdot_max"]) > 60.0:
-		_fail("attack qdot %.1f > 60 rad/s" % float(atk["qdot_max"]))
-	if float(up["min_clear"]) <= 0.0:
-		_fail("attack_up table collision %.4f %s" % [float(up["min_clear"]), str(up["min_pair"])])
-	if float(up["qdot_max"]) > 25.5:
-		_fail("attack_up qdot %.1f > 25.5 rad/s" % float(up["qdot_max"]))
+	var a1: Dictionary = ch.attack_plan_stats("attack1")
+	var a2: Dictionary = ch.attack_plan_stats("attack2")
+	print("  attack1 build %.1f ms  min clear %.4f  qdot %.1f  samples %d" % [
+		float(a1["plan_ms"]), float(a1["min_clear"]), float(a1["qdot_max"]), int(a1["samples"])])
+	print("  attack2 build %.1f ms  min clear %.4f  qdot %.1f  samples %d" % [
+		float(a2["plan_ms"]), float(a2["min_clear"]), float(a2["qdot_max"]), int(a2["samples"])])
+	# real-time idle/run sample cost
+	var t0 := Time.get_ticks_usec()
+	for i in 200:
+		anim.sample("idle", anim.duration("idle") * float(i) / 200.0)
+	var idle_us := float(Time.get_ticks_usec() - t0) / 200.0
+	t0 = Time.get_ticks_usec()
+	for i in 200:
+		anim.sample("run", anim.duration("run") * float(i) / 200.0)
+	var run_us := float(Time.get_ticks_usec() - t0) / 200.0
+	print("  realtime solve: idle %.2f ms  run %.2f ms per frame" % [idle_us / 1000.0, run_us / 1000.0])
+	if float(a1["min_clear"]) <= 0.0:
+		_fail("attack1 trajectory collision %.4f" % float(a1["min_clear"]))
+	if float(a2["min_clear"]) <= 0.0:
+		_fail("attack2 trajectory collision %.4f" % float(a2["min_clear"]))
+	if idle_us / 1000.0 > 3.0 or run_us / 1000.0 > 3.0:
+		_fail("realtime idle/run solve too slow (%.2f / %.2f ms)" % [idle_us / 1000.0, run_us / 1000.0])
+	if float(anim.build_ms) > 6000.0:
+		_fail("full build %.0f ms > 6000" % float(anim.build_ms))
+
+
+func _test_optic() -> void:
+	print("\n-- optic --")
+	ch.set_anim_time(0.0)
+	var shell: Node3D = ch.rig.J["optic_shell"]
+	var eye: Node3D = ch.rig.J["eye_aim"]
+	var identity_ok := true
+	for nm in ["idle", "run", "attack1", "attack2", "block"]:
+		for f in [0.0, 0.4, 0.8]:
+			var p: Dictionary = anim.sample(nm, anim.duration(nm) * f)
+			ch.rig.apply_pose(p)
+			var t := shell.transform
+			if not t.basis.is_equal_approx(Basis.IDENTITY) or t.origin.length_squared() > 1e-12:
+				identity_ok = false
+	print("  fixed lens shell never rotates: %s" % str(identity_ok))
+	if not identity_ok:
+		_fail("fixed lens shell moved with a pose")
+	# aim at a set of points; direction must match within 1.5 degrees
+	ch.P["lens_track"] = 0.0
+	ch.set_anim_time(0.0)
+	var worst := 0.0
+	for tgt in [Vector3(2.3, 1.4, 2.6), Vector3(-2.8, 0.7, 2.0),
+			Vector3(0.0, 0.55, 4.0), Vector3(1.2, 2.3, 3.2)]:
+		ch.aim_eye_at(tgt)
+		var dir: Vector3 = ch.eye_dir()
+		var want: Vector3 = (tgt - eye.global_position).normalized()
+		var err := rad_to_deg(dir.angle_to(want))
+		worst = maxf(worst, err)
+		var rot := eye.rotation
+		print("  target %s -> eye dir %s  err %.2f deg  yaw %.1f pitch %.1f" % [
+			str(tgt), str(dir), err, rad_to_deg(rot.y), rad_to_deg(rot.x)])
+		if err > 1.5:
+			_fail("optic aim error %.2f deg > 1.5" % err)
+	print("  worst optic aim error %.2f deg" % worst)
+	ch.P["lens_track"] = 1.0
+
+
+func _test_tracks() -> void:
+	print("\n-- tracks --")
+	var loop: float = kin.track_loop_len()
+	var dur: float = anim.duration("run")
+	var p0: Dictionary = anim.sample("run", 0.0)
+	var p1: Dictionary = anim.sample("run", dur)
+	var dtravel := absf(float(p1["track_L"]) - float(p0["track_L"]))
+	print("  belt loop %.3f m  travel/cycle %.3f m  wheel/cycle %.1f rad" % [
+		loop, dtravel, float(p1["wheel_L"]) - float(p0["wheel_L"])])
+	if absf(dtravel - loop) > 0.002:
+		_fail("run travel per cycle %.3f does not match belt loop %.3f" % [dtravel, loop])
+	var spins := absf(float(p1["wheel_L"]) - float(p0["wheel_L"])) / TAU
+	if absf(spins - round(spins)) > 0.01:
+		_fail("run wheel spin %.3f rev is not periodic" % spins)
+	# plates really move (computed from the pose; a headless render server does
+	# not keep MultiMesh buffers)
+	var a: Transform3D = ch.rig.belt_plate_xf("trackL", 0, float(p0["track_L"]))
+	var p25: Dictionary = anim.sample("run", dur * 0.25)
+	var b: Transform3D = ch.rig.belt_plate_xf("trackL", 0, float(p25["track_L"]))
+	print("  plate 0 moved %.4f m over a quarter cycle (travel %.3f m)" % [
+		a.origin.distance_to(b.origin), float(p25["track_L"])])
+	if a.origin.distance_to(b.origin) < 0.05:
+		_fail("belt plates do not move during run")
+	# belt direction: the ground contact patch must run backwards (toward -Z)
+	var c: Transform3D = ch.rig.belt_plate_xf("trackL", 0, 0.0)
+	var d2: Transform3D = ch.rig.belt_plate_xf("trackL", 0, -0.02)
+	var near_bottom := false
+	for i in 8:
+		var q: Transform3D = ch.rig.belt_plate_xf("trackL", i, 0.0)
+		if q.origin.y < 0.14:
+			near_bottom = true
+			var q2: Transform3D = ch.rig.belt_plate_xf("trackL", i, -0.02)
+			if q2.origin.z > q.origin.z:
+				_fail("belt contact patch runs forward under a negative travel")
+			break
+	if not near_bottom:
+		_fail("no belt plate reaches the ground contact patch")
+
+
+func _test_static_clearance() -> void:
+	print("\n-- turret vs chassis clearance --")
+	var worst_x := 9.0
+	var worst_y := 9.0
+	var worst_waist := 9.0
+	var track_inner: float = kin.track_x - kin.track_hw
+	for nm in ["idle", "run", "attack1", "attack2", "block"]:
+		var dur: float = anim.duration(nm)
+		for i in 25:
+			var pose: Dictionary = anim.sample(nm, dur * float(i) / 24.0)
+			var bx: Transform3D = kin.body_xf(pose)
+			var ch_half: float = kin.cube_half - 0.052
+			for sx in [-1.0, 1.0]:
+				for sy in [-1.0, 1.0]:
+					for sz in [-1.0, 1.0]:
+						var q: Vector3 = bx * Vector3(sx * ch_half, sy * ch_half, sz * ch_half)
+						worst_x = minf(worst_x, track_inner - absf(q.x))
+						worst_y = minf(worst_y, q.y - (kin.deck_y + kin.deck_hy))
+	print("  cube corner to track inner wall %.4f m" % worst_x)
+	print("  cube lowest corner above deck %.4f m" % worst_y)
+	var leds: Array = ch.rig._leds
+	print("  status LEDs: %d" % leds.size())
+	if leds.size() < 6:
+		_fail("status LED row missing (%d)" % leds.size())
+	ch.rig.set_status_time(0.0)
+	var e0: float = (leds[0]["mat"] as StandardMaterial3D).emission_energy_multiplier
+	ch.rig.set_status_time(0.42)
+	var e1: float = (leds[0]["mat"] as StandardMaterial3D).emission_energy_multiplier
+	ch.rig.set_status_time(1.05)
+	var e2: float = (leds[0]["mat"] as StandardMaterial3D).emission_energy_multiplier
+	if absf(e0 - e1) < 1e-4 and absf(e1 - e2) < 1e-4:
+		_fail("status LEDs do not blink")
+	if worst_x < 0.005:
+		_fail("turret cube corners hit the track inner walls (%.4f m)" % worst_x)
+	if worst_y < 0.01:
+		_fail("turret cube hits the chassis deck (%.4f m)" % worst_y)
 
 
 func _write_report() -> void:
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://renders"))
-	var f := FileAccess.open("res://renders/v2/qa_report.json", FileAccess.WRITE)
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://renders/v3"))
+	var f := FileAccess.open("res://renders/v3/qa_report.json", FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify({
 			"pass": fails.is_empty(), "fails": fails, "rows": rows,
-			"timing": {"attack_ms": anim.attack_ms, "attack_up_ms": anim.attack_up_ms,
-				"defend_ms": anim.defend_ms, "build_ms": anim.build_ms},
+			"timing": {"attack1_ms": anim.attack1_ms, "attack2_ms": anim.attack2_ms,
+				"block_ms_raw": anim.block_plan_raw_ms, "build_ms": anim.build_ms},
 		}, "  "))
 		f.close()

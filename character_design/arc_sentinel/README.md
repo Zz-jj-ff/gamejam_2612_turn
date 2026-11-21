@@ -1,266 +1,157 @@
-# ARC // SENTINEL v2
+# ARC // SENTINEL v3 — 三角履带炮塔 · 单臂闪电剑
 
-**Two-wheel balancing war machine — a fully procedural Godot 4 character.**
+一个**独立可运行**的 Godot 4.7.2 角色工程：全部资产（网格、材质、动画、特效）
+在运行时由代码生成，没有任何外部模型、贴图、字体或音频。
 
-Everything in this project is generated from code at runtime: meshes, materials,
-shaders, animation, collision proxies, IK and VFX. There is no imported model,
-texture, font or audio file. Open `scenes/studio.tscn` for the live studio:
-orbit camera, spin-box tuning, animation transport and a joint-by-joint posing
-tab.
+这是「普通小怪」的重制版：从 v2 的双轮平衡机兵换成了
+**双三角履带 + 立方体炮塔 + 单条顶置三关节机械臂**。
+从旧版保留下来的只有两样东西：**电弧闪电剑** 和 **正面那颗红色摄像头**。
+
+| | |
+| --- | --- |
+| 定位 | 基础近战小怪（1 级杂兵） |
+| 身高 | **1.56 m**（到肩部球关节顶，不含机械臂）；机械臂全举时约 2.8 m |
+| 体宽 | 1.15 m（两履带外缘） |
+| 主色 | 黑色金属 + 橙红能量 + 红色单眼 |
+| 动画 | `idle` / `run`（循环）、`attack1` / `attack2` / `block`（单次） |
+| 武器 | 电弧闪电剑（无刀鞘，剑始终点亮） |
 
 ```bash
 cd arc_sentinel
-./run.sh                       # DISPLAY=:10 by default
-# or
-DISPLAY=:10 godot --path .
+./run.sh                                        # 交互演示（DISPLAY=:10）
+godot --headless --path . res://scenes/qa.tscn  # 全量验收
 ```
 
 ---
 
-## 1. Concept
+## 1. 造型
 
-A compact industrial sentinel balanced on two solid, independently suspended
-wheels. The body is a short cylindrical pressure hull whose axis is
-front/back. The front carries a large camera objective — the machine's only
-"face"; the rear has a domed service bulge and a mechanical shield hook; the
-left flank carries the sword sheath. There is no head.
+**两条三角履带夹着中间的立方体炮塔。** 三角履带是**钝角三角形**（顶角约 103°）：
+底部一条长边 + 顶部一个低矮圆角顶点，而不是正三角形。每条履带：
 
-* **Two solid wheels**, no spokes, each wrapped in a full ring of raised metal
-  tread plates (friction + armour) and a glowing outboard ring. Each wheel is
-  carried by a telescopic strut with the coil spring sleeved directly on the
-  rod; the whole strut compresses/extends with the body while the axles stay
-  on the ground. No lever arm crosses the wheel face.
-* **Two flexible arms**, each a chain of three visible ball joints
-  (shoulder / elbow / wrist) plus the tool segment. Left wrist ends in the
-  shield mount; right wrist ends in a **short arc-generator head** (no hilt)
-  that projects the electric sword.
-* **Black + orange-red machined metal.** Metallic PBR with procedural brushed
-  streaks, roughness breakup, sparse scratches, pitting and edge wear. The
-  electric sword, shield field, iris and seams are the only saturated light.
-* **Ball-turret camera eye.** A small ball housing sits just outside the hull
-  front; the barrel retracts only ~0.08 m (the glowing eye stays the outermost
-  part) and the static iris/socket closes the hull behind it. It looks up at
-  the blade during the rising cut. The ball can yaw/pitch without sweeping a
-  collar through the hull.
+- 44 块独立履带板：黑色阳极氧化钢底 + 两条纵向防滑筋 + 端部铆钉，
+  每 6 块有一块橙色标记板，跑动时能直接看出履带在转；
+- 开放式三角桁架：三条边框梁 + 中央轮毂 + 三根辐条 + 三个角轮（球墨轮毂、
+  橙色装饰环、6 颗螺栓、5 根辐条），以及后部张紧器；
+- 橡胶内衬带 + 细密的金属磨削/拉丝/点蚀微表面（程序化 PBR 金属 shader）。
 
-Dimensions (defaults): wheel radius 0.325 m, wheel centres x ±0.45 m, body root
-y 0.62 m, hull radius 0.225 m, shoulder pivots ±0.27 m / y 1.10 m, upper arm
-0.48 m, forearm 0.40 m, tool 0.13 m (reach 1.01 m), shield radius 0.31 m,
-electric blade 1.03 m, overall height ≈1.4 m.
+**立方体炮塔**（0.52 m 边长，倒角立方体）坐在履带之间，底部有炮塔环，
+通过固定腰柱与底盘相连：
 
-## 2. Controls
+- **红色摄像头**：光学窗口半径 = 立方体边长的 **1/3**（0.173 m）。
+  外部是**固定不转**的金属镜圈 / 遮光罩 / 薄玻璃罩；镜圈内是一颗
+  **会转动的红色光球**（带纬度环带、瞳孔与虹膜），转动时光球上的亮斑
+  始终指向观察者。球心埋进机身内部，只露出很浅的一段球冠。
+- 大眼正下方一排 **6 颗闪烁指示灯**，颜色依次为绿 / 橙 / 蓝，
+  各自独立相位闪烁。
+- 顶部：三关节机械臂的球窝塔座（细长颈部，为手臂留出活动空间）。
+- 侧面：散热槽、橙色装甲缝；背面：电池包、排气口、电量条。
 
-| Input | Function |
-| --- | --- |
-| mouse drag | orbit |
-| wheel | zoom |
-| `F` | reset view |
-| `H` | hide/show UI |
-| `Space` | play/pause |
-| `F12` | screenshot |
-| `1` … `8` | rest / idle / walk / attack / attack_up / defend / draw / sheathe |
+**单条三关节机械臂**从立方体正上方伸出：根部球关节 → 段 1 →
+肘部球关节 → 段 2 → 腕部球关节 → 黑**发射器**（剑柄，全黑无红色）→
+电弧剑。没有盾牌，没有刀鞘。
 
-The right panel has `ANIM`, `PARAMS`, `JOINTS`, `INFO`. Every numeric row is a
-real SpinBox. `JOINTS` can pose the character one joint at a time. In
-`PARAMS → ANIM // DEFEND`, `threat side` selects the defend case: 0 = front-left
-(shield), 1 = front-right (sword); press `6` again to replay the block.
+---
 
-**Transition state machine.** `rest` and the drawn states are connected only
-through `draw` / `sheathe`; a one-shot (`attack`, `attack_up`, `defend`, `draw`,
-`sheathe`) is never cancelled mid-swing. A request made during a one-shot is
-queued and starts after it finishes. This is what guarantees that a sword swing
-cannot be cross-faded through the hull. Idle/walk crossfade normally; all
-one-shots start and end on the idle base pose.
+## 2. 动作
 
-## 3. Animation set
-
-| clip | duration | loop | content |
-| --- | --- | --- | --- |
-| `rest` | 4.0 s | yes | sword generator docked in the left sheath (blade off), shield hung on the rear hook, arms folded low, torso twisted 35° toward the sheath |
-| `idle` | 3.2 s | yes | deployed low guard: sword low-right, shield low-left/front, gentle balance sway |
-| `walk` | 0.9 s | yes | rolling gait: one wheel revolution per cycle, suspension bob, body lean, arm counter-swing |
-| `attack` | 1.60 s | no | left-back windup → left-front-up straight → right-down finish; body turns into the cut |
-| `attack_up` | 1.77 s | no | rising diagonal lower-left → upper-right, straight-arm finish |
-| `defend` | 1.26–1.28 s | no | threat-driven block: front-left 45° ⇒ shield, front-right 45° ⇒ sword |
-| `draw` | 0.90 s | no | rest → idle: shield off the back hook, sword out of the sheath, blade ignites when clear |
-| `sheathe` | 0.85 s | no | idle → rest: blade off before the generator enters the sheath, shield back on the hook |
-
-The exact attack constraints are enforced by the solver and checked by QA:
-
-* `attack` windup: tool above the left shoulder at (0.45, 1.55, −0.05) m,
-  blade direction (0.55, 0.50, −0.67) — left, back and up; body/torso yaw
-  +12°/+30°. Via: blade (0.60, 0.45, 0.66) left-front-up with a straight arm
-  (0.00°). Front: blade (0, 0, 1) straight forward, tip z 2.06 m, chest facing
-  front. End: straight arm/blade direction (−0.60, −0.45, 0.66) —
-  **right-front-down**, tool x −0.92 m / z 0.66 m, tip y 0.15 m / z 1.34 m;
-  the sword stays in front. Body stays near front (body 0° / torso −10°) so the
-  cut is in front, not at the side.
-* `attack_up` windup: blade exactly horizontal backward (0, 0, −1), every part
-  of the blade left of the hull (min x +0.497 m), tool y 0.80 m. End: arm and
-  blade are one straight line at 44.93° up-right (0.00° between them).
-
-## 4. Block contract
-
-There is **no guard fallback**. `defend` always resolves to one of the two
-mandated effectors:
-
-| threat | effector | result |
+| clip | 长度 | 内容 |
 | --- | --- | --- |
-| front-left 45° at the chest | **shield** | threat ray passes through the disc centre, miss 0.000 m, min clearance +0.013 m |
-| front-right 45° at the chest | **sword** | threat ray crosses the blade, miss 0.000 m, min clearance +0.019 m |
+| `idle` | 3.20 s | 刀平举、略微上翘、指向正前方；胳膊折叠（肘弯 ~117°）。轻微伺服呼吸、履带微动、光球持续追踪观察者 |
+| `run` | 0.72 s | 履带滚动（一个周期正好一圈履带、车轮 4 整圈，循环无接缝）、车身前倾 7.5°、上下颠簸、持刀略抬 |
+| `attack1` | ~1.07 s | **正上方重砍**：抬刀到立方体正上方（刀尖 2.81 m）→ 过顶下劈 → 刀尖落到身前 0.57 m 高 → 跟随、回收 |
+| `attack2` | ~1.16 s | **横扫**：刀收到右后方（刀尖 x −1.29）→ 水平掠过正面 → 停在左后方（刀尖 x +1.40），扫过约 479°，整段刀身保持水平 |
+| `block` | 0.88 s | **基于路径规划的格挡**：先求解一个剑面正对威胁、刀身横切威胁射线的架式，再过渡、保持、回位 |
 
-The block pose is built once by the solver and loaded from the trajectory
-table; plan time is ≤5 ms.
+**连续性**：所有单次动作都从 idle 的同一姿势出发，并在结尾 0.14–0.16 s
+内混回完全相同的 idle 基准姿势；状态机不会在挥砍中途取消动作，新请求排队；
+切换时有 0.10 s 的姿势混合。QA 会逐帧检查所有可达 clip 之间的混合。
 
-## 5. Solver and trajectory table
+**无穿模**：每条轨迹逐帧做自碰撞审计（胶囊 / 有向盒代理），
+最差间隙为正；刀尖 / 刀身永远高于地面。
 
-* **Analytic two-bone IK with a free swivel** around the shoulder→wrist axis
-  (Korein/Badler-style). The wrist is a 3-DOF ball joint; the elbow is a ball
-  joint with a pure pitch plus a twist-sharing roll. All joints are stored as
-  **quaternions**, so no Euler gimbal flips can reach the rig.
-* The tool target is authored in root space and transformed into torso space,
-  so torso yaw/lean participates while the exact end pose is preserved.
-* Key poses are solved with **collision-aware swivel selection** against body
-  capsules/discs; a whole-clip swivel branch is selected for the attack path.
-* Attack/draw/block trajectories are sampled (56 Hz) from Cartesian key
-  targets, solved with warm-start swivel continuity, collision-repaired and
-  smoothed. The attack is re-timed as one swing by the sword-tip arc length
-  with a single smooth speed bell (no per-key stops); the other clips are
-  locally time-reparameterized to a 25 rad/s joint-speed cap. The result is baked to `data/arc_traj_v2.json` (≈0.7 MB, far
-  below the 50 MB budget). Runtime plan times: **attack 1 ms, attack_up 1 ms,
-  block ≤13 ms**.
-* The table is signed by the geometry parameters. If a geometry parameter
-  changes, the runtime solver rebuilds the clips (offline-style, seconds) and
-  the stale table is not used.
-* Idle/walk/rest are solved live (small procedural targets, fixed elbow pole)
-  and are also covered by the collision audit.
-* Runtime smoothness: there is no periodic full-vertex radius scan or collision
-  sweep. The radius is measured once per rig build and clearance once per clip
-  change, so the render loop has no 0.6 s hitch. The old additive blade-core
-  plane was removed; the arc field alone is the blade, and it cannot leave a
-  translucent sword silhouette when a frame is long.
-* The state machine tracks a logical `rest`/`drawn` stance. Requests made
-  during a one-shot are queued to the latest target, and every request resolves
-  through `draw`/`sheathe` when the stance changes; transitions are never
-  skipped because `current_anim` still holds a previous clip name.
-* The studio's PARAMS panel includes `ENVIRONMENT → ambient light / exposure`;
-  the defaults are 1.25 / 1.15. They drive the WorldEnvironment live.
+---
 
-Collision model: capsules for the hull/camera/links/blade, discs for the
-shield/wheels, spheres for the ball joints. Every pair that is not a neighbour
-in the same kinematic chain is checked. Docked pairs (generator in the sheath,
-shield on the rear hook) are exempt only while actually docked.
+## 3. Block 规划
 
-## 6. Acceptance
+`block` 不是烘焙好的固定动画，而是每次威胁方向变化时**现场规划**：
 
-Run:
+1. 把威胁方向（方位角 ±85°、俯仰角 ±15°）转成从胸前指向攻击者的射线；
+2. 在「拦截深度 × 刀身交点位置 × 刀面倾角 × 左右镜像」的候选集里，
+   把刀身中线放到威胁射线上、刀面朝向来袭方向，用解析 swivel IK 求解手臂；
+3. 对每个候选做一次全身审计，取「净空 + 关节代价」最优的架式；
+4. 用 32 Hz 的笛卡尔插值生成进入 / 保持 / 回位轨迹，逐帧审计，
+   碰撞的采样点会自动微调刀的位置或换一个肘部解；
+5. 同一个威胁方向的结果会缓存。
+
+实测（本机 GTX 1650 / Godot 4.7.2，无头）：
+
+- 首次规划 **11–20 ms**（8 个测试方向，中位 ~15 ms），缓存后 ~0 ms；
+- 因此**不再预烘焙** block 表；v2 的 0.7 MB `data/arc_traj_v2.json` 已删除；
+- 规划出的架式实测：威胁射线到刀身距离 **0.0000 m**，刀面误差 **0.0°**，
+  整段轨迹最小净空 **≥ 0.043 m**。
+
+---
+
+## 4. 绑定与数据
+
+- 单臂：肩 / 肘 / 腕三个球关节，`L1=0.46`、`L2=0.40`、`L3=0.115`，
+  刀长 1.03 m。解析双骨 IK + 自由 swivel 角 + 3-DOF 腕对齐；
+  关节用四元数存储/插值，轨迹求解时带上一帧 seed 保持肘部不跳支。
+- 关节直接驱动：`JOINTS` 页可以把任意关节摆到任意角度（证明模型不是烘焙的）。
+- 性能探针：`DISPLAY=:10 godot --path . res://scenes/perf_v3.tscn`
+- 参数：立方体尺寸、臂长、刀长/刀宽、idle 摆幅、跑动速度、
+  两个攻击的 lead / follow / overshoot、block 的威胁方位/俯仰/lead/hold/release、
+  刀光强度、电弧速度、拖尾寿命、光球强度/追踪、环境光/曝光。
+  几何参数改动会即时重建模型并保持当前姿势。
+- 没有任何外部资源；无 `.glb` / `.obj` / 贴图 / 字体 / 音频。
+- 性能（1600×900，GTX 1650，Forward+）：**87 fps** 无 vsync / 60 fps 有 vsync，
+  325 draw calls，约 15.1 万 primitives（`res://scenes/perf_v3.tscn` 可复测）。
+
+---
+
+## 5. 验收
 
 ```bash
-# full QA (collisions on every clip frame, reachable transitions, exact attack
-# poses, both blocks, solver timing)
+cd arc_sentinel
+godot --headless --path . --import      # 首次
 godot --headless --path . res://scenes/qa.tscn
-
-# re-bake the trajectory table after changing the motion
-godot --headless --path . --script res://scripts/bake_traj.gd
-
-# motion frame strips for visual review (960×540, 16 frames × 4 views × 9 clips)
-DISPLAY=:10 godot --path . res://scenes/v2_shots.tscn
-
-# metal / camera / wheel / shield / sword closeups + full-body views
-DISPLAY=:10 godot --path . res://scenes/v2_details.tscn
-
-# mandated block renders with a ghost threat blade
-DISPLAY=:10 godot --path . res://scenes/block_demo.tscn
 ```
 
-Latest QA (`renders/v2/qa_report.json`): **PASS, 0 failures**.
+结果：**PASS（0 failures）**。覆盖：
 
-| check | result |
-| --- | --- |
-| clip self-collision | rest +0.0265 / idle +0.0526 / walk +0.0407 / attack +0.0392 / attack_up +0.0099 / defend +0.0130 / draw +0.0265 / sheathe +0.0536 m |
-| floor | every clip ≥ −0.0000 m |
-| reachable blends | worst +0.0501 m (all state-machine-reachable transitions) |
-| attack pose | windup (0.45,1.55,−0.05) dir left-back-up / via left-front-up straight / front (0,0,1) tip z 2.06 / end dir (−0.60,−0.45,0.66) right-front-down, arm straight |
-| attack_up pose | dir (0,0,−1), min x 0.497 / end arm+blade straight at 44.93° up-right |
-| blocks | shield & sword both hit, no guard |
-| solver | attack 1 ms, attack_up 1 ms, block ≤13 ms (baked) |
-| joint speed | attack: single smooth tip-speed bell, peak qdot 47.7 rad/s (shield-arm correction); other clips capped at 25 rad/s |
+- 5 个 clip 各 120 帧逐帧自碰撞 + 地面 + 刀尖高度；
+- 所有状态机可达的 clip 两两混合（13 步）无穿模；
+- 单次动作首尾与 idle 基准姿势的关节差 < 0.01 rad；
+- `attack1` 过顶高度 / 落点高度 / 矢状面；`attack2` 扫掠角 > 180°；
+- 8 个威胁方向的 block：命中误差、刀面朝向、轨迹净空、规划耗时；
+- 光球追踪误差 0.00°、外壳（镜圈）在全部姿势下完全不动；
+- 履带循环长度 = 每周期行程、车轮整圈、履带板确实在动；
+- 立方体炮塔与履带内侧 / 底盘的最小间隙；
+- 6 颗状态灯存在且确实在闪。
 
-Visual evidence is in `renders/v2/`:
+详细逐项数字见 `renders/v3/qa_report.json`。
 
-* `details/hero.png`, `front_full.png`, `side_full.png`, `back_full.png`
-* `details/camera*.png`, `wheel*.png`, `metal.png`, `shield.png`,
-  `sword.png`, `body.png`, `shoulder.png`, `rest_back.png`, `sheath.png`
-* `block_left.png`, `block_right.png`
-* `sheets/*.png` (all 16 frames × 4 views for every clip)
-* `frames/<clip>/<view>_<i>.png` (source frames)
+视觉验收：
 
-**Metal:** `shaders/arc_metal_v2.gdshader` is a lit PBR metal shader with
-object-space brushed micro-grooves, roughness breakup, fine pitting, sparse
-scratches and fresnel edge wear; SSR + a stage reflection probe supply the
-environment highlights. It is deliberately tuned as dark machined metal, not a
-mirror or plastic.
-
-## 7. Known limits (honest)
-
-* The camera eye retracts only 0.08 m and stays outside the hull; the barrel
-  never dives into the body. During `attack_up` it pitches up to watch the
-  blade, so the lens is not facing the viewer in that clip.
-* The attack is 1.60 s including anticipation, one smooth swing and recovery;
-  the sword-tip speed rises once and falls once through the cut.
-* The baked trajectory table is bound to the default geometry signature. If you
-  change hull/wheel/shield/blade dimensions, the solver rebuilds; the first
-  build after such a change is seconds, not milliseconds.
-* The ghost enemy blades in `block_left/right.png` are illustrative HDR
-  emissive props; the actual block proof is the ray/disc/segment test in QA
-  (miss 0.000 m).
-* The shield is an additive hard-light field (unshaded), not a metal plate; the
-  rim and struts are metal. This is the established shield style.
-* Skin/metal detail is procedural but stylized; it is not a scanned 3A texture
-  set.
-* Seven generated texture RIDs are reported as leaked when the process exits;
-  they do not affect the running scene.
-
-## 8. Directory
-
-```text
-scenes/
-  studio.tscn          interactive studio (default)
-  character.tscn       contract implementation
-  qa.tscn              full acceptance QA
-  v2_shots.tscn        motion frame strips
-  v2_details.tscn      full-body + closeup renders
-  block_demo.tscn      left/right 45° block renders
-  shots.tscn           generic contact-sheet runner
-scripts/
-  ch/arc_rig.gd        skeleton + procedural geometry
-  ch/arc_kin.gd        analytic IK, swivel, collision proxies
-  ch/arc_anim.gd       key poses, Cartesian trajectories, bake/load
-  ch/arc_sentinel.gd   contract, state machine, FX, lens
-  ch/arc_materials.gd  palette / material wiring
-  ch/arc_field.gd      stochastic arc blade (ported from weapon_electricity_sword)
-  ch/arc_bolt.gd       arc ribbon mesh
-  ch/arc_sword_fx.gd   blade FX driver
-  bake_traj.gd         offline trajectory bake
-  qa.gd                acceptance checks
-  kit/                 shared mesh/material/panel/studio kit
-shaders/               metal, lens, shield, arc ribbon, trail, floor, grade
-data/arc_traj_v2.json  baked trajectory table (~0.7 MB)
-renders/v2/            final renders, sheets, frames, QA report
+```bash
+DISPLAY=:10 godot --path . res://scenes/v3_details.tscn   # 全身 / 光球 / 履带 / 关节特写
+DISPLAY=:10 godot --path . res://scenes/v3_shots.tscn     # 5 clip × 4 视角逐帧分解
 ```
 
-## 9. Planning references
+`renders/v3/` 下有最终图、特写和动作分解帧。
 
-The solver is a hybrid of classic robot-arm planning techniques:
+---
 
-* analytic two-bone IK with a swivel angle (Korein & Badler, 1982; Tolani,
-  Goswami & Badler, 2000);
-* redundancy resolved at the elbow roll so the wrist stays out of gimbal lock;
-* damped-least-squares / CCD and FABRIK were considered; the analytic branch is
-  used because it is exact and microsecond-scale;
-* Cartesian key targets + collision-aware sampling + local time
-  reparameterization (a practical simplification of trajectory optimization
-  methods such as CHOMP/STOMP, Ratliff et al. 2009; Kalakrishnan et al. 2011);
-* RRT/RRT-Connect (LaValle 1998; Kuffner & LaValle 2000) was not needed at this
-  scale: the workspace is a small known hull and the safe transit points are
-  authored in the key targets.
+## 6. 已知限制
+
+- 身高 1.56 m 量到肩部球关节顶（不含机械臂）；机械臂举过头顶时整体约 2.8 m。
+- 炮塔相对底盘只能偏转 ±8°，因为立方体夹在两条履带之间；更大的转向由
+  整个履带底盘原地偏转（`root_yaw`）完成，这在动作里是刻意的「履带打滑」。
+- 光球球心在机身内部，但为了满足「眼的半径 = 边长 1/3」，球冠会突出
+  正面约 6 cm；它不是完全埋进平面的。
+- 攻击动作有重量感（1.07–1.16 s），不是游戏化的极速快挥。
+- block 首次规划 11–20 ms、缓存后 0 ms；如果每帧都换威胁方向，那就是每帧
+  十几毫秒的规划开销（当前实现按需调用，不逐帧规划）。
+- 金属细节是程序化风格化硬表面，不是扫描级 3A 贴图。
+- 进程退出时 Godot 会报告少量生成纹理 / RID 泄漏，运行中无影响。

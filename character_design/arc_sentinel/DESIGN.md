@@ -1,156 +1,106 @@
-# ARC // SENTINEL v2 — two-wheel balancer redesign
+# DESIGN — ARC // SENTINEL v3（GRINDER）
 
-This document is the contract the implementation is audited against. The old
-biped rig is replaced wholesale; only the studio shell (camera / UI / stage) and
-the shared mesh kit are reused.
+## 目标
 
-## 1. Silhouette
+把旧版双轮平衡机兵重做成一个**普通小怪**：只保留「电弧闪电剑」和
+「正面红色摄像头」两个识别点，其余全部换成新造型。
 
-* Two-wheel balancing machine, no legs, no head.
-* Two solid metal wheels (R 0.325 m, W 0.15 m), one per side, no spokes, with a
-  full ring of raised metal tread plates (18 per wheel).
-* Each wheel is carried by a telescopic strut from the chassis to the inboard
-  hub; the coil spring is sleeved directly on the rod and stretches/compresses
-  with it. No lever arm crosses the wheel face. Wheel axles stay on the ground
-  while the body pitches/rolls/bobs.
-* Body is an approximately cylindrical pressure hull whose axis is front/back:
-  * front: a small ball-turret camera eye with a retracting barrel;
-  * rear: a small domed bulge with a mechanical shield hook;
-  * left flank: a long sword sheath;
-  * no head, top capped with a machined deck + vents.
-* Two 3-ball-joint arms (shoulder / elbow / wrist spheres), 0.80 m total reach.
-  Left wrist ends in the shield mount; right wrist ends in a very short arc
-  generator head (no hilt). Weapons are part of the last arm segment.
-* Palette: black/graphite machined metal + orange-red (accent panels, seams,
-  iris, electric blade, shield energy). Metal, not plastic.
+- 两条**三角履带**夹住中间的**立方体身体**；
+- 立方体正上方伸出**一条三关节机械臂**（根 / 段 1 / 段 2 / 剑，关节全是球形关节）；
+- 红色摄像头**半嵌入**立方体，突出很小；内部红光球旋转指向观察者，
+  外部镜头圆壳固定不转；
+- 无刀鞘、无盾牌、单体单臂；
+- 动作只有 idle / run / attack1（正上方重砍）/ attack2（横扫）/ block（路径规划）；
+- 全金属、黑主色；所有动作连贯、无瞬移、无穿模。
 
-## 2. Coordinates
+## 比例
 
-`+X = character left`, `+Y = up`, `+Z = forward`. Ground `y=0`.
-
-| item | value |
+| 项 | 值 |
 | --- | --- |
-| wheel radius / width | 0.325 / 0.150 m |
-| axle centers | x ±0.450, y 0.325, z 0.000 |
-| body root | (0, 0.620, 0) |
-| torso pivot | body-local (0, 0.160, 0) |
-| hull center | torso-local (0, 0.280, 0), r 0.225, half-length 0.26 |
-| camera ball center | torso-local (0, 0.280, 0.310), r 0.115; barrel/pod retracts ≤0.08 m; lens stays outside |
-| shoulder pivots | torso-local (±0.270, 0.320, 0.020) |
-| upper / fore / tool | 0.480 / 0.400 / 0.130 m (reach 1.010) |
-| shield radius / dome | 0.310 / 0.080 m |
-| blade length (visual) | 1.030 m |
-| camera eye | front centre y ~0.90 m, ball r 0.115 m, barrel r 0.092 m; small retraction only |
-| sheath | body-local (0.225, 0.090, 0.180) → (0.235, -0.020, -0.330) |
+| 履带外缘总宽 | 1.15 m |
+| 履带接地长度 | 1.37 m |
+| 履带总高 | 0.81 m |
+| 立方体边长 | 0.52 m |
+| 光学窗口半径 | 0.173 m = 立方体边长 / 3 |
+| 肩部球关节高 | 1.46 m |
+| 身高（不含臂，量到肩球顶） | **1.56 m** |
+| 单臂 | L1 0.46 / L2 0.40 / 末端 0.115 / 刀 1.03 m |
 
-## 3. Animation set
+履带三角形取钝角：底边 1.0 m、高 0.394 m，顶角约 103°。
+这样履带又低又长，跟「炮塔」的体积关系更接近杂兵而不是主战坦克。
 
-`rest`, `idle`, `walk`, `attack`, `attack_up`, `defend`, `draw`, `sheathe`.
+## 光学的两层结构
 
-* `rest` — sword generator docked in the left sheath (blade off), shield hung on
-  the rear hook, arms folded low/relaxed. Loop.
-* `idle` — weapons deployed: the arm is bent and the blade points up-right; shield low-left/front. Loop.
-* `walk` — two-wheel rolling gait: wheel spin, suspension bob, body lean, arm
-  counter-swing. Loop.
-* `draw` / `sheathe` — one-shot transitions `rest → idle` / `idle → rest`,
-  solved with the same analytic arm IK; blade ignites only after it clears the
-  sheath.
-* `attack` — body-turned overhead cut upper-left → front; the arm/blade line is straight through the finish.
-* `attack_up` — rising cut lower-left → upper-right; the arm/blade line is straight at the finish.
-* `defend` — shield block for a front-left 45° threat, sword block for a
-  front-right 45° threat. No "guard" fallback: both threats always resolve to
-  their mandated effector.
+```
+固定层（optic_shell）          旋转层（eye_aim）
+  金属镜圈 (r 0.173–0.192)        红色光球 (r 0.145)
+  外圈橙色细环                     瞳孔球冠（朝 +Z）
+  4 个压紧卡爪                     橙色虹膜带
+  薄玻璃罩（固定）                 机械赤道带
+  遮光眉板 / 下颌
+```
 
-All non-transition clips start and end on the idle base pose, so crossfades do
-not pop. `rest ↔ idle` only happens through `draw` / `sheathe` (automatic when
-`play_anim` is called across that boundary).
+- 只有 `eye_aim` 节点会转，`optic_shell` 的变换永远是单位矩阵（QA 检查）。
+- 光球材质用纬度环带 + 经向接缝 + 缓慢呼吸，让「球在转」这件事可见；
+  瞳孔与虹膜是球面上的球冠，直接钉在瞄准方向上。
+- 瞄准角限幅 ±62° / ±42°，瞳孔始终落在 1/3 半径的窗口内。
+- 光球中心埋进立方体内部 3 cm，只露出球冠，所以正面突出量很小。
 
-## 4. Exact attack constraints
+## 手臂
 
-Measured from the analytic blade axis `d` (unit, root space).
+三球关节串联 + 末端发射器，和旧版同一套解析 IK 思路，但只有一条手臂、且
+根部在炮塔正上方，因而：
 
-### attack (left-back → left-front-up → right-down)
+- 没有左右臂互相穿模问题；
+- 肘部主要在身体侧上方活动，与立方体的碰撞约束集中在「上臂是否切过
+  立方体顶角」这一件事上，所以规划/烘焙都更便宜；
+- 关节用四元数存储，轨迹逐帧求解时以上一帧为 seed，肘部不会在两支之间跳变。
 
-* Windup:
-  * generator above the **left** shoulder: tool (0.45, 1.55, −0.05) m;
-  * blade direction left-back-up (0.55, 0.50, −0.67);
-  * body/torso yaw +12°/+30° — a large left twist.
-* Via:
-  * blade left-front-up (0.60, 0.45, 0.66);
-  * arm and blade collinear (≤6°), full reach.
-* Front:
-  * blade exactly forward `d = (0, 0, 1)`, arm straight, tip z 2.06 m, chest
-    facing front — the blade must travel through the space in front of the body.
-* End:
-  * blade right-down with **zero front/back** component: `d = (−0.906, −0.423, 0)`;
-  * arm and blade collinear (≤6°), tool x −1.18 m / z −0.16 m, tip y 0.20 m;
-  * body/torso turn right (−12°/−30°) so this rightward cut is in front of the
-    body, not off its front-right.
-* The whole start → via → end → follow swing is re-timed by the sword-tip arc
-  length with one smooth bell; there are no per-key velocity zeros. Peak tip
-  speed 16.2 m/s; peak joint diagnostic 47.7 rad/s (shield arm correction).
+`idle` 的姿势：工具点（发射器）在身前 0.5 m、高 1.29 m，刀尖指向正前方
+并上翘 4.6°，肘部弯 117°（折叠）。
 
-### attack_up (lower-left → upper-right)
+## 动作设计
 
-* Windup:
-  * blade horizontal and backward: `d.y ≈ 0`, `d.z < -0.97`;
-  * every sampled point of the blade volume has `x > 0.26` (entirely left of
-    the hull);
-  * tool point low-left: `y < 0.90`, `x > 0.30`.
-* End:
-  * arm and blade are collinear (≤6° between shoulder→wrist and blade);
-  * the whole line is raised 44.93° up-right; the arm is no longer horizontal;
-  * blade 45° up-right: `d.x < 0`, `d.y > 0`, angle to horizontal
-    `asin(d.y) = 45° ± 5°`.
+### attack1 — 正上方重砍
 
-## 5. Block contract
+```
+idle → 抬刀 → 举到头顶正上方（刀尖 2.81 m）→ 过顶下劈
+     → 落点（刀尖 y 0.57 / z 1.44，矢状面内）→ 跟随 → 回收 → idle
+```
 
-* Threat A: incoming blade from front-left 45° toward the chest.
-  **Effector must be `shield`.** The shield disc plane is orthogonal to the
-  threat direction and the threat ray passes through the disc centre (measured
-  miss 0.000 m).
-* Threat B: incoming blade from front-right 45° toward the chest.
-  **Effector must be `sword`.** The threat ray crosses the blade segment
-  (measured miss 0.000 m).
-* `effector ∈ {shield, sword}` always; the string `guard` / `none` is a test
-  failure.
-* Runtime plan time < 50 ms; measured 1–5 ms with the baked table; the offline
-  bake takes ~20 s and is a build step, not a frame cost.
+过顶到落点按刀尖弧长重定时：加速进入落点、减速离开，只有一次加速峰。
 
-## 6. Collision contract
+### attack2 — 横扫
 
-Every pair of collision proxies that is not physically connected (same link
-chain) must keep positive clearance in every frame of every clip, every
-transition and both block poses. Connected pairs (adjacent arm links, wheel ↔
-suspension, weapon ↔ its tool) are exempt. Docked pairs (generator ↔ sheath in
-`rest`, shield ↔ rear hook in `rest`) are treated as connected while docked.
+刀收到角色右后方（刀尖 x −1.29, z −0.64），刀身保持水平（|dir.y| < 0.02），
+绕身体扫过正面到左后方（刀尖 x +1.40），总方位角约 479°。
+扫掠平面抬高到 y ≈ 1.45（肩高附近），因此刀身不会切到立方体顶面；
+躯干 ±5°、整机 root_yaw ±12° 补足重量感。
 
-Proxies: capsules for hull/waist/camera/arms/blade, discs for shield/wheels,
-spheres for joints. Clearance = minimum surface distance between proxies.
+### block — 规划而不是烘焙
 
-## 7. Solver
+见 README 第 3 节。关键取舍：
 
-* Two-bone analytic IK with a free swivel angle around the shoulder→wrist axis
-  (Korein/Badler style), collision-aware swivel selection; the elbow also
-  shares the forearm twist so the wrist stays out of gimbal lock. Joint
-  orientations are stored and interpolated as quaternions.
-* Wrist (3 DOF) aligns the tool frame exactly; elbow is a pure pitch.
-* Tool targets are authored in root space and transformed into torso space, so
-  torso yaw/lean participates without breaking the exact end poses.
-* Cartesian key poses + collision-aware sampling for the sword arcs; the
-  sampled joint trajectory is smoothed and locally time-reparameterized to a
-  25 rad/s joint-speed cap for the non-attack clips; the attack uses the smooth tip-speed retime.
-* The resulting trajectory table is baked to `data/arc_traj_v2.json` (≈0.7 MB,
-  far below the 50 MB budget). Runtime attack/block plan: 1–5 ms. The table is
-  signed by the geometry parameters; a geometry change falls back to the
-  runtime solver.
+- 刀面正对威胁（宽面格挡）而不是刀锋对砍：电弧剑没有实体刃，
+  宽面格挡在视觉上最清楚；
+- 刀身永远从拦截点向**上**倾斜（-26°…-6° 只是在水平附近微调），
+  向下的刀身会把刀尖送进履带；
+- 手臂够不到更远的拦截点时，候选会被 reach 过滤掉，不会给出一个
+  「看起来在挡、其实差 10 cm」的假格挡。
 
-## 8. Visual acceptance
+## 材质
 
-* Metal surfaces show procedural brushed streaks, micro-pitting, scratches,
-  roughness breakup, edge wear and environment/SSR highlights.
-* Renders: hero, front, side, back, rest, idle, walk, attack, attack_up,
-  defend-shield, defend-sword, block demos, wheel/camera/metal closeups.
-* A vision-capable subagent reviews every animation's decomposed frame strip
-  and must report no motion that reads as physically impossible / unnatural for
-  the machine.
+- 黑金属：`arc_metal_v2.gdshader`（程序化拉丝、点蚀、划痕、边缘磨损、氧化）。
+- 履带板同样是金属，但粗糙度压到 0.30，避免大面积朝上的平板在棚灯下
+  变成「浅灰水泥」；每 6 块一块橙色标记板。
+- 橡胶内衬、状态灯、光球、玻璃罩各自独立材质。
+- 所有大面积朝上 / 斜视的「黑件」都避免使用宽高光金属，否则会读出灰白色，
+  破坏黑色主调（这是本次迭代踩到的最大坑）。
+
+## 已知取舍
+
+- 炮塔相对底盘 ±8°，因为立方体夹在履带之间；大角度转向用整机 root_yaw。
+- 光学窗口做到边长 1/3 后，球冠必然外凸约 6 cm，无法同时满足
+  「突出很小」和「窗口很大」；本次按用户要求优先保证窗口尺寸。
+- 履带板是实例化网格（每侧 44 块，其中 7 块橙色），用 MultiMesh 保持单 draw call。
+- 整机 325 draw calls / 15.1 万 primitives / 1600×900 无 vsync 87 fps。
