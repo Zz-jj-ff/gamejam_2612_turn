@@ -8,16 +8,20 @@ const Vesper = preload("res://scripts/mech/mech_rig.gd")
 const Kit = preload("res://scripts/mech/mesh_kit.gd")
 const PreviewFloor = preload("res://gfx/preview_floor.gdshader")
 const StudioSky = preload("res://gfx/studio_sky.gdshader")
+const ClassicGlass = preload("res://shaders/phase_preview_glass_classic.gdshader")
 const PHASE_APPEARANCES := [
 	["原版 · 青紫切面", null, 0.51, "青紫切片、离体薄片和运动残光。"],
 	["折射隐身", preload("res://shaders/phase_preview_refraction.gdshader"), 0.99, "背后的景物穿过轮廓时会弯折，边缘有轻微色散。"],
 	["棱镜反光", preload("res://shaders/phase_preview_prism.gdshader"), 0.85, "装甲保留体积，高光随观察角度变色。"],
 	["青白光流", preload("res://shaders/phase_preview_lightflow.gdshader"), 0.84, "透明机身上有流动的青白扫描线。"],
+	["玻璃棱镜", preload("res://shaders/phase_preview_glass.gdshader"), 0.99, "清透外壳，光线在不规则内部截面分色。转动视角可看到局部全内反射。"],
+	["玻璃棱镜 · 初版", ClassicGlass, 0.99, "蓝色透光甲片带冷白高光，彩色折边随观察角度变化。"],
+	["玻璃棱镜 · 无火彩", ClassicGlass, 0.99, "蓝色透明甲片，带背景折射和冷白反光。"],
 ]
 const FOCUS := Vector3(0, 2.45, 0.54)
 const WIDE := 10.4
 enum ViewMode { NORMAL, PHASED, GAZE }
-enum PhaseAppearance { ORIGINAL, REFRACTION, PRISM, LIGHTFLOW }
+enum PhaseAppearance { ORIGINAL, REFRACTION, PRISM, LIGHTFLOW, GLASS, CLASSIC_GLASS, CLASSIC_GLASS_NO_FIRE }
 
 var model: Node3D
 var reference: Node3D
@@ -47,6 +51,7 @@ var _appearance_picker: OptionButton
 var _appearance := PhaseAppearance.ORIGINAL
 var _phase_light: OmniLight3D
 var _appearance_material: ShaderMaterial
+var _glass_seeds_set := false
 var _phase_state := PhaseState.new()
 var _look_angles := Vector2.ZERO
 var _phase_clock := 0.0
@@ -79,6 +84,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_phase_clock += delta
+	if _appearance == PhaseAppearance.GLASS:
+		_appearance_material.set_shader_parameter("flow_time", _phase_clock)
 	_preview_shake = move_toward(_preview_shake, 0.0, delta * 5.4)
 	if _view_mode == ViewMode.GAZE:
 		var previous_stage := _phase_state.stage
@@ -373,11 +380,22 @@ func _set_phase_appearance(index: int) -> void:
 		_appearance_material = ShaderMaterial.new()
 		_appearance_material.shader = PHASE_APPEARANCES[index][1]
 		_appearance_material.render_priority = 2
+		if _appearance_material.shader == ClassicGlass:
+			_appearance_material.set_shader_parameter("spectral_fire", _appearance == PhaseAppearance.CLASSIC_GLASS)
 	if _view_mode == ViewMode.NORMAL:
 		_mode_picker.select(ViewMode.PHASED)
 		_set_view_mode(ViewMode.PHASED)
 	else:
 		_apply_motion()
+	if _appearance == PhaseAppearance.GLASS and not _glass_seeds_set:
+		var parts := model.find_children("*", "MeshInstance3D", true, false)
+		for i in parts.size():
+			var part: MeshInstance3D = parts[i]
+			part.set_instance_shader_parameter("part_seed", fposmod(float(i + 1) * 0.618033989, 1.0))
+			var bounds := part.get_aabb()
+			part.set_instance_shader_parameter("part_center", bounds.get_center())
+			part.set_instance_shader_parameter("part_half_size", bounds.size * 0.5)
+		_glass_seeds_set = true
 
 
 func _build_playback_controls(ui: Control) -> void:
