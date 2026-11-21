@@ -52,6 +52,8 @@ func _ready() -> void:
 		await _seq_laser()
 	if run_all or "telescope" in pick:
 		await _seq_telescope()
+	if run_all or "cut" in pick:
+		await _seq_cut()
 
 	var idx_name := "index.txt" if run_all else "index_%s.txt" % only.replace(",", "_")
 	var f := FileAccess.open(outdir.path_join(idx_name), FileAccess.WRITE)
@@ -112,12 +114,12 @@ func _seq_idle() -> void:
 	b.set_motion_mode("free")
 	_target(Vector3(0, 0, 13.0))
 	_step(150)
-	studio.set_view(26, 11, 33.0, Vector3(0, 4.2, 0.5))
+	studio.set_view(26, 12, 40.0, Vector3(0, 5.0, 0.5))
 	for i in 30:
 		_step(12)  # 0.2 s
 		await _snap("idle/%02d.png" % i)
 	# top view for mutual clearance
-	studio.set_view(18, 46, 38.0, Vector3(0, 3.0, 0.0))
+	studio.set_view(18, 48, 44.0, Vector3(0, 3.0, 0.0))
 	for i in 20:
 		_step(12)
 		await _snap("idle_top/%02d.png" % i)
@@ -132,11 +134,11 @@ func _seq_support() -> void:
 	b.set_motion_mode("circle", 1.2, 10.0)
 	_target(Vector3(0, 0, 13.0))
 	_step(330)
-	studio.set_view(30, 9, 28.0, Vector3(0, 3.5, 1.0))
+	studio.set_view(30, 9, 34.0, Vector3(0, 4.4, 1.0))
 	for i in 30:
 		_step(15)  # 0.25 s, 7.5 s of a 10 s circle
 		await _snap("support/%02d.png" % i)
-	studio.set_view(86, 7, 28.0, Vector3(0, 3.2, 0.3))
+	studio.set_view(86, 7, 34.0, Vector3(0, 4.2, 0.3))
 	for i in 20:
 		_step(15)
 		await _snap("support_side/%02d.png" % i)
@@ -156,7 +158,7 @@ func _seq_attack1() -> void:
 	_roles([0, 4, 6])
 	_target(Vector3(2.5, 0, 11.5))
 	_step(220)
-	studio.set_view(60, 13, 26.0, Vector3(0.5, 3.2, 6.0))
+	studio.set_view(60, 13, 36.0, Vector3(0.5, 3.6, 6.0))
 	b.force_role(2, "attack1")
 	for i in 22:
 		_step(8)  # 0.133 s
@@ -169,7 +171,7 @@ func _seq_attack2() -> void:
 	_roles([0, 4, 6])
 	_target(Vector3(-3.0, 0, 11.0))
 	_step(220)
-	studio.set_view(60, 13, 26.0, Vector3(0.5, 3.2, 6.0))
+	studio.set_view(60, 13, 36.0, Vector3(0.5, 3.6, 6.0))
 	b.force_role(2, "attack2")
 	for i in 26:
 		_step(8)
@@ -182,12 +184,12 @@ func _seq_attack3() -> void:
 	_roles([0, 4, 6])
 	_target(Vector3(2.0, 0, 12.0))
 	_step(220)
-	studio.set_view(30, 34, 33.0, Vector3(0, 2.6, 1.0))
+	studio.set_view(28, 30, 50.0, Vector3(0, 2.4, 0.0))
 	b.force_role(2, "attack3")
-	for i in 28:
+	for i in 45:
 		_step(9)  # 0.15 s
 		await _snap("attack3/%02d.png" % i)
-	lines.append("attack3: 140 deg sweep at r=9.5 m, 0.15 s/frame")
+	lines.append("attack3: 20 m limb laid at 1 m, full 360 deg sweep, 0.15 s/frame")
 
 
 # ---------------------------------------------------------------- phases
@@ -197,11 +199,11 @@ func _seq_phase1() -> void:
 	_roles([0, 2, 4, 6])
 	_target(Vector3(0, 0, 13.0))
 	_step(240)
-	studio.set_view(26, 10, 28.0, Vector3(0, 3.8, 1.0))
+	studio.set_view(26, 11, 34.0, Vector3(0, 5.0, 1.0))
 	await _snap("phase1/hero.png")
-	studio.set_view(0, 6, 27.0, Vector3(0, 3.5, 0.8))
+	studio.set_view(0, 7, 33.0, Vector3(0, 5.0, 0.8))
 	await _snap("phase1/front.png")
-	studio.set_view(90, 7, 28.0, Vector3(0, 3.2, 0.5))
+	studio.set_view(90, 7, 34.0, Vector3(0, 4.6, 0.5))
 	await _snap("phase1/side.png")
 	studio.set_view(8, 7, 7.4, Vector3(0, 3.6, 1.5))
 	await _snap("phase1/eye.png")
@@ -210,21 +212,21 @@ func _seq_phase1() -> void:
 
 func _seq_phase2() -> void:
 	# opening sequence from the phase-1 stance
-	studio.set_view(26, 10, 28.0, Vector3(0, 3.8, 1.0))
+	studio.set_view(26, 11, 34.0, Vector3(0, 5.0, 1.0))
 	b.set_phase_force(2)
 	for i in 18:
 		_step(10)  # 0.167 s, 3 s opening
 		await _snap("phase2_open/%02d.png" % i)
 	_step(160)
-	studio.set_view(26, 10, 28.0, Vector3(0, 3.8, 1.0))
+	studio.set_view(26, 11, 34.0, Vector3(0, 5.0, 1.0))
 	await _snap("phase2/hero.png")
 	studio.set_view(8, 7, 7.4, Vector3(0, 3.6, 1.5))
 	await _snap("phase2/core.png")
-	studio.set_view(0, 6, 27.0, Vector3(0, 3.5, 0.8))
+	studio.set_view(0, 7, 33.0, Vector3(0, 5.0, 0.8))
 	await _snap("phase2/front.png")
-	studio.set_view(90, 7, 28.0, Vector3(0, 3.2, 0.5))
+	studio.set_view(90, 7, 34.0, Vector3(0, 4.6, 0.5))
 	await _snap("phase2/side.png")
-	studio.set_view(180, 8, 28.0, Vector3(0, 3.2, 0.0))
+	studio.set_view(180, 8, 34.0, Vector3(0, 4.6, 0.0))
 	await _snap("phase2/back.png")
 	lines.append("phase2: shell fully open, plasma core, containment wall")
 
@@ -252,6 +254,22 @@ func _seq_telescope() -> void:
 	lines.append("telescope: T1 idle 15 m -> support ~8 m -> idle, 0.1 s/frame, root view")
 
 
+func _seq_cut() -> void:
+	# cut limb 1 from the tip to the socket: joint pops, sparks, shards
+	_reset()
+	_all_idle()
+	_target(Vector3(0, 0, 13.0))
+	_step(120)
+	studio.set_view(28, 8, 20.0, Vector3(4.6, 3.4, 4.6))
+	b.cut_tentacle(0)
+	for i in 42:
+		_step(3)  # 0.05 s
+		await _snap("cut/%02d.png" % i)
+	_step(60)
+	await _snap("cut/after.png")
+	lines.append("cut: tip-to-root joint pops on T1, 0.05 s/frame + 1 s later still")
+
+
 func _seq_laser() -> void:
 	_reset()
 	_roles([0, 4, 6])
@@ -259,7 +277,7 @@ func _seq_laser() -> void:
 	_step(220)
 	b.set_phase_force(2)
 	_step(280)
-	studio.set_view(60, 13, 26.0, Vector3(0.5, 3.2, 6.0))
+	studio.set_view(60, 13, 36.0, Vector3(0.5, 3.6, 6.0))
 	b.fire_laser()
 	_step(56)  # charge
 	for i in 14:

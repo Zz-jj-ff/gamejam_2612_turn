@@ -96,22 +96,22 @@ func _build_ground() -> void:
 	add_child(mi)
 	# raised central service plate
 	var parts: Array = []
-	_p(parts, MK.disc(15.2, 0.08, 128, 0.03), BM.hull(), Vector3(0, -0.02, 0))
-	_p(parts, MK.ring(15.05, 15.30, 0.05, 128, 0.012), BM.steel_dark(), Vector3(0, 0.008, 0))
+	_p(parts, MK.disc(23.0, 0.08, 160, 0.03), BM.hull(), Vector3(0, -0.02, 0))
+	_p(parts, MK.ring(22.80, 23.10, 0.05, 160, 0.012), BM.steel_dark(), Vector3(0, 0.008, 0))
 	for k in 24:
 		var a := TAU * float(k) / 24.0
-		var p := Vector3(cos(a), 0, sin(a)) * 14.2
+		var p := Vector3(cos(a), 0, sin(a)) * 21.8
 		_p(parts, MK.prism(8, 0.11, 0.09, 0.05), BM.steel(), p + Vector3(0, 0.025, 0))
 	# radial inlays
 	for k in 12:
 		var a2 := TAU * float(k) / 12.0 + 0.13
 		var p0 := Vector3(cos(a2), 0, sin(a2)) * 4.0
-		var p1 := Vector3(cos(a2), 0, sin(a2)) * 14.0
+		var p1 := Vector3(cos(a2), 0, sin(a2)) * 21.6
 		_p(parts, SK.beam(p0, p1, 0.055, 0.02, 0.045, 0.02, 0.3), BM.trim(), Vector3(0, 0.022, 0))
 	# hazard chevrons near the rim, flat on the plate
 	for k in 32:
 		var a3 := TAU * float(k) / 32.0
-		var p := Vector3(cos(a3), 0, sin(a3)) * 12.6
+		var p := Vector3(cos(a3), 0, sin(a3)) * 19.6
 		_p(parts, MK.plate(0.60, 0.15, 0.025, 0.008),
 			BM.emissive(Color(1.0, 0.28, 0.04), 1.6) if k % 2 == 0 else BM.steel_dark(),
 			p + Vector3(0, 0.021, 0), Basis(Vector3.UP, -a3) * Basis(Vector3.RIGHT, -90.0 * PI / 180.0))
@@ -142,7 +142,7 @@ func _build_arena() -> void:
 	# containment ring segments (broken ring)
 	for k in 24:
 		var a := TAU * float(k) / 24.0
-		var p := Vector3(cos(a), 0, sin(a)) * 16.4
+		var p := Vector3(cos(a), 0, sin(a)) * 24.6
 		var b := Basis(Vector3.UP, -a)
 		_p(parts, MK.plate(3.4, 0.6, 0.45, 0.04), steel, p + Vector3(0, 0.45, 0), b)
 		if k % 2 == 0:
@@ -151,7 +151,7 @@ func _build_arena() -> void:
 	# low bollards
 	for k in 16:
 		var a := TAU * float(k) / 16.0 + 0.2
-		var p := Vector3(cos(a), 0, sin(a)) * 19.0
+		var p := Vector3(cos(a), 0, sin(a)) * 27.6
 		_p(parts, MK.prism(10, 0.26, 0.18, 1.5), steel, p + Vector3(0, 0.75, 0))
 		_p(parts, MK.ring(0.18, 0.24, 0.05, 20, 0.01), glow, p + Vector3(0, 1.42, 0))
 	for e in SK.bake(parts):
@@ -169,7 +169,7 @@ func _build_pylons() -> void:
 	var cool := BM.emissive(Color(0.28, 0.52, 1.0), 2.2)
 	for i in 8:
 		var a := TAU * float(i) / 8.0 + 0.18
-		var r := 26.0 + 2.5 * float(i % 3)
+		var r := 32.0 + 2.5 * float(i % 3)
 		var h := 15.0 + 5.0 * float((i * 3) % 4)
 		var p := Vector3(cos(a) * r, h * 0.5, sin(a) * r)
 		var b := Basis(Vector3.UP, -a)
@@ -222,7 +222,7 @@ func _build_haze() -> void:
 	p.visibility_aabb = AABB(Vector3(-30, -8, -30), Vector3(60, 26, 60))
 	var pm := ParticleProcessMaterial.new()
 	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	pm.emission_box_extents = Vector3(26.0, 8.0, 26.0)
+	pm.emission_box_extents = Vector3(30.0, 8.0, 30.0)
 	pm.direction = Vector3(0, 1, 0)
 	pm.spread = 180.0
 	pm.initial_velocity_min = 0.03

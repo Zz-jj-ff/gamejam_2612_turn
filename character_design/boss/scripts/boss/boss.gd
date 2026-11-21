@@ -27,6 +27,11 @@ const BODY_R := 2.0
 const BODY_SCALE := 2.0 / 3.0
 const TENT_N := 40
 const FX_RING := preload("res://shaders/fx_ring.gdshader")
+const FX_SPARK_P := preload("res://shaders/fx_spark_particle.gdshader")
+const FX_VOL := preload("res://shaders/fx_vol_explosion.gdshader")
+const ICH0 := preload("res://shaders/ich0_rgba_noise_medium.png")
+const ICH2 := preload("res://shaders/ich2_grey_noise_small.png")
+const N_BURST := 72
 
 const DEFAULTS := {
 	"motion_amp": 1.15, "motion_speed": 1.0, "wave_amp": 1.0,
@@ -78,7 +83,8 @@ var _stand_h := 6.00
 var _trails: Array = []
 var _tip_hist: Array = []
 var _impact_pool: Array = []
-var _cut_pool: Array = []
+var _cut_fx: Array = []
+var _bursts: Array = []
 var _fx_rng := RandomNumberGenerator.new()
 var _beam_core: MeshInstance3D
 var _beam_glow: MeshInstance3D
@@ -111,7 +117,8 @@ func _ready() -> void:
 	_build_trails()
 	_build_laser()
 	_build_impact_pool()
-	_build_cut_pool()
+	_build_burst_pool()
+	_build_cut_fx_systems()
 	# initial formation: four planted, four loose
 	for i in N_TENT:
 		if i % 2 == 0:
@@ -234,194 +241,202 @@ func _build_impact_pool() -> void:
 			"mat": m, "ring_mat": rm, "t": 0.0, "active": false})
 
 
-func _build_cut_pool() -> void:
-	# One cut burst = a flash, white-hot metal sparks, tumbling shards and a
-	# short smoke puff. Bursts are re-used; nothing is left behind.
-	var spark_mesh := CylinderMesh.new()
-	spark_mesh.top_radius = 0.006
-	spark_mesh.bottom_radius = 0.0015
-	spark_mesh.height = 1.0
-	spark_mesh.radial_segments = 4
-	spark_mesh.rings = 1
-	var spark_mat := StandardMaterial3D.new()
-	spark_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	spark_mat.albedo_color = Color(1.0, 0.88, 0.55)
-	spark_mat.emission_enabled = true
-	spark_mat.emission = Color(1.0, 0.62, 0.18)
-	spark_mat.emission_energy_multiplier = 6.5
-	spark_mat.disable_receive_shadows = true
-	var frag_mesh := MK.plate(1.0, 0.72, 0.16, 0.015)
-	var frag_mat := BM.steel_dark()
-	var smoke_tex := BM.contact_shadow().albedo_texture
-	var flash_tex := BM.contact_shadow().albedo_texture
-	for i in 30:
+func _make_spark_pm() -> ParticleProcessMaterial:
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	pm.emission_sphere_radius = 0.32
+	pm.direction = Vector3.UP
+	pm.spread = 180.0
+	pm.initial_velocity_min = 3.5
+	pm.initial_velocity_max = 11.0
+	pm.gravity = Vector3(0, -17.0, 0)
+	pm.scale_min = 0.6
+	pm.scale_max = 1.3
+	pm.particle_flag_align_y = true
+	var g := Gradient.new()
+	g.set_color(0, Color(1.0, 0.95, 0.75, 1.0))
+	g.set_color(0.55, Color(1.0, 0.35, 0.05, 0.85))
+	g.set_color(1, Color(0.8, 0.12, 0.01, 0.0))
+	var gt := GradientTexture1D.new()
+	gt.gradient = g
+	pm.color_ramp = gt
+	return pm
+
+
+func _make_frag_pm() -> ParticleProcessMaterial:
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	pm.emission_sphere_radius = 0.40
+	pm.direction = Vector3.UP
+	pm.spread = 180.0
+	pm.initial_velocity_min = 2.0
+	pm.initial_velocity_max = 6.0
+	pm.gravity = Vector3(0, -12.0, 0)
+	pm.scale_min = 0.7
+	pm.scale_max = 1.5
+	pm.angular_velocity_min = -540.0
+	pm.angular_velocity_max = 540.0
+	return pm
+
+
+func _make_particles(mesh: Mesh, pm: ParticleProcessMaterial,
+		amount: int, lifetime: float) -> GPUParticles3D:
+	var p := GPUParticles3D.new()
+	p.amount = amount
+	p.lifetime = lifetime
+	p.one_shot = false
+	p.explosiveness = 0.0
+	p.randomness = 0.65
+	p.local_coords = false
+	p.emitting = false
+	p.process_material = pm
+	p.draw_pass_1 = mesh
+	p.visibility_aabb = AABB(Vector3(-16, -6, -16), Vector3(32, 22, 32))
+	return p
+
+
+func _build_burst_pool() -> void:
+	# 24 one-shot raymarched fireballs, recycled by age. The shader is a 1:1
+	# port of Duke's "Volumetric explosion" (shadertoy.com/view/lsySzd), using
+	# the original iChannel0 / iChannel2 textures.
+	for i in N_BURST:
+		var mat := ShaderMaterial.new()
+		mat.shader = FX_VOL
+		mat.set_shader_parameter("noise_tex", ICH0)
+		mat.set_shader_parameter("noise2_tex", ICH2)
+		var q := QuadMesh.new()
+		q.size = Vector2.ONE
+		var mi := MeshInstance3D.new()
+		mi.name = "CutBurst%d" % i
+		mi.mesh = q
+		mi.material_override = mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.visible = false
+		add_child(mi)
+		_bursts.append({"mi": mi, "mat": mat, "active": false,
+			"age": 0.0, "life": 1.0, "rad": 0.8, "seed": 0.0, "ts": 2.2})
+
+
+func spawn_burst(pos: Vector3, radius: float, life: float) -> void:
+	var slot: Dictionary = {}
+	var oldest := -1.0
+	for b in _bursts:
+		if not b["active"]:
+			slot = b
+			break
+		if b["age"] > oldest:
+			oldest = b["age"]
+			slot = b
+	if slot.is_empty():
+		return
+	slot["active"] = true
+	slot["age"] = 0.0
+	slot["life"] = life
+	slot["rad"] = radius
+	slot["seed"] = _fx_rng.randf() * TAU
+	slot["ts"] = 2.40 + _fx_rng.randf() * 1.30
+	slot["mi"].global_position = pos
+	slot["mi"].scale = Vector3.ONE * (radius * 2.42 * 0.62)
+	slot["mi"].visible = true
+	var mat: ShaderMaterial = slot["mat"]
+	mat.set_shader_parameter("seed", slot["seed"])
+	mat.set_shader_parameter("time_scale", slot["ts"])
+	mat.set_shader_parameter("lt", 0.0)
+	mat.set_shader_parameter("fade", 0.0)
+	mat.set_shader_parameter("intensity", 1.0)
+
+
+func _update_bursts(dt: float) -> void:
+	for b in _bursts:
+		if not b["active"]:
+			continue
+		b["age"] += dt
+		var u: float = b["age"] / b["life"]
+		if u >= 1.0:
+			b["active"] = false
+			b["mi"].visible = false
+			continue
+		var f := smoothstep(0.0, 0.08, u) * (1.0 - smoothstep(0.70, 1.0, u))
+		var mat: ShaderMaterial = b["mat"]
+		mat.set_shader_parameter("lt", b["age"])
+		mat.set_shader_parameter("fade", f)
+		var k: float = 0.58 + 0.42 * smoothstep(0.0, 0.34, u)
+		b["mi"].scale = Vector3.ONE * (b["rad"] * 2.42 * k)
+
+
+func _build_cut_fx_systems() -> void:
+	# Per-limb debris rig: sparks, torn plates and a muzzle light. The fire
+	# itself is the raymarched fireball, not sprite particles.
+	for i in N_TENT:
 		var root := Node3D.new()
-		root.name = "CutBurst%d" % i
+		root.name = "CutFX%d" % i
 		add_child(root)
-		var flash := MeshInstance3D.new()
-		var fq := QuadMesh.new()
-		fq.size = Vector2(1, 1)
-		flash.mesh = fq
-		var fm := StandardMaterial3D.new()
-		fm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		fm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		fm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-		fm.albedo_texture = flash_tex
-		fm.albedo_color = Color(1.0, 0.72, 0.34, 1.0)
-		fm.disable_receive_shadows = true
-		flash.material_override = fm
-		flash.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		root.add_child(flash)
-		var sparks: Array = []
-		for k in 9:
-			var mi := MeshInstance3D.new()
-			mi.mesh = spark_mesh
-			mi.material_override = spark_mat
-			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			root.add_child(mi)
-			sparks.append({"mi": mi, "vel": Vector3.ZERO, "pos": Vector3.ZERO,
-				"len": 0.2, "wid": 0.006, "life": 0.3, "t": 0.0})
-		var frags: Array = []
-		for k in 6:
-			var mi := MeshInstance3D.new()
-			mi.mesh = frag_mesh
-			mi.material_override = frag_mat
-			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			root.add_child(mi)
-			frags.append({"mi": mi, "vel": Vector3.ZERO, "pos": Vector3.ZERO,
-				"scale": 0.06, "life": 0.6, "t": 0.0, "spin": Vector3.ZERO})
-		var smoke: Array = []
-		for k in 3:
-			var mi := MeshInstance3D.new()
-			var sq := QuadMesh.new()
-			sq.size = Vector2(1, 1)
-			mi.mesh = sq
-			var sm := StandardMaterial3D.new()
-			sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			sm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-			sm.albedo_texture = smoke_tex
-			sm.albedo_color = Color(0.055, 0.048, 0.045, 0.0)
-			sm.disable_receive_shadows = true
-			mi.material_override = sm
-			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			root.add_child(mi)
-			smoke.append({"mi": mi, "vel": Vector3.ZERO, "pos": Vector3.ZERO,
-				"size": 0.35, "life": 0.85, "t": 0.0, "mat": sm})
+		var spark_mesh := CylinderMesh.new()
+		spark_mesh.top_radius = 0.008
+		spark_mesh.bottom_radius = 0.002
+		spark_mesh.height = 0.22
+		spark_mesh.radial_segments = 4
+		spark_mesh.rings = 1
+		var spark_mat := ShaderMaterial.new()
+		spark_mat.shader = FX_SPARK_P
+		spark_mesh.material = spark_mat
+		var sparks := _make_particles(spark_mesh, _make_spark_pm(), 64, 0.60)
+		root.add_child(sparks)
+		var frag_mesh := MK.plate(0.10, 0.07, 0.02, 0.004)
+		frag_mesh.surface_set_material(0, BM.steel_dark())
+		var frags := _make_particles(frag_mesh, _make_frag_pm(), 18, 1.0)
+		root.add_child(frags)
 		var li := OmniLight3D.new()
-		li.light_color = Color(1.0, 0.45, 0.14)
+		li.light_color = Color(1.0, 0.40, 0.10)
 		li.light_energy = 0.0
-		li.omni_range = 4.0
+		li.omni_range = 10.0
 		li.shadow_enabled = false
 		root.add_child(li)
-		root.visible = false
-		_cut_pool.append({"root": root, "flash": flash, "flash_mat": fm,
-			"sparks": sparks, "frags": frags, "smoke": smoke, "light": li,
-			"t": 0.0, "life": 0.95, "power": 1.0, "active": false})
+		_cut_fx.append({"root": root, "sparks": sparks, "frags": frags,
+			"light": li, "active": false, "next_burst_t": 0.0})
 
 
-func cut_burst(pos: Vector3, power: float) -> void:
-	var pick = null
-	for e in _cut_pool:
-		if not e["active"]:
-			pick = e
-			break
-	if pick == null:
+func emit_cut_fx(i: int, pos: Vector3, on: bool, fade: float) -> void:
+	if i < 0 or i >= _cut_fx.size():
 		return
-	pick["active"] = true
-	pick["t"] = 0.0
-	pick["power"] = power
-	pick["root"].visible = true
-	pick["root"].position = pos
-	var rr := _fx_rng
-	var base := Vector3(rr.randf_range(-1.0, 1.0), rr.randf_range(-0.25, 1.0),
-		rr.randf_range(-1.0, 1.0)).normalized()
-	for sp in pick["sparks"]:
-		var d: Vector3 = (base + Vector3(rr.randf_range(-0.9, 0.9),
-			rr.randf_range(-0.7, 0.9), rr.randf_range(-0.9, 0.9))).normalized()
-		sp["pos"] = Vector3.ZERO
-		sp["vel"] = d * rr.randf_range(2.2, 7.5) * power
-		sp["len"] = rr.randf_range(0.10, 0.30) * power
-		sp["wid"] = rr.randf_range(0.0035, 0.0085)
-		sp["life"] = rr.randf_range(0.16, 0.42)
-		sp["t"] = 0.0
-		sp["mi"].visible = true
-	for fr in pick["frags"]:
-		var d2 := Vector3(rr.randf_range(-1.0, 1.0), rr.randf_range(-0.1, 1.0),
-			rr.randf_range(-1.0, 1.0)).normalized()
-		fr["pos"] = Vector3.ZERO
-		fr["vel"] = d2 * rr.randf_range(1.4, 5.2) * power
-		fr["scale"] = rr.randf_range(0.035, 0.095) * power
-		fr["life"] = rr.randf_range(0.40, 0.80)
-		fr["t"] = 0.0
-		fr["spin"] = Vector3(rr.randf_range(-9, 9), rr.randf_range(-9, 9), rr.randf_range(-9, 9))
-		fr["mi"].visible = true
-	for sm in pick["smoke"]:
-		var d3 := Vector3(rr.randf_range(-0.7, 0.7), rr.randf_range(0.2, 1.0),
-			rr.randf_range(-0.7, 0.7)).normalized()
-		sm["pos"] = Vector3.ZERO
-		sm["vel"] = d3 * rr.randf_range(0.25, 1.1)
-		sm["size"] = rr.randf_range(0.30, 0.62) * (0.8 + 0.4 * power)
-		sm["life"] = rr.randf_range(0.55, 0.95)
-		sm["t"] = 0.0
-		sm["mi"].visible = true
-	pick["light"].light_energy = 5.5 * power
+	var e = _cut_fx[i]
+	e["root"].global_position = pos
+	e["sparks"].emitting = on
+	e["frags"].emitting = on
+	if on:
+		e["active"] = true
+		var fl := 0.72 + 0.28 * absf(sin(t * 23.0 + float(i) * 2.1))
+		e["light"].light_energy = 14.0 * fl * clampf(fade, 0.25, 1.0)
+		if t >= e["next_burst_t"]:
+			e["next_burst_t"] = t + 0.040 + 0.050 * _fx_rng.randf()
+			var jitter := Vector3(_fx_rng.randf_range(-0.22, 0.22),
+				_fx_rng.randf_range(-0.22, 0.22), _fx_rng.randf_range(-0.22, 0.22))
+			var r: float = lerpf(0.85, 1.55, clampf(fade, 0.0, 1.0))
+			r *= 0.72 + 0.62 * _fx_rng.randf()
+			spawn_burst(pos + jitter, r, 2.10 + 0.90 * _fx_rng.randf())
+	else:
+		e["active"] = false
+		e["light"].light_energy = 0.0
 
 
-func _update_cut_fx(dt: float) -> void:
-	for e in _cut_pool:
-		if not e["active"]:
-			continue
-		e["t"] += dt
-		if e["t"] >= e["life"]:
-			e["active"] = false
-			e["root"].visible = false
-			continue
-		var p: float = e["power"]
-		var ft: float = e["t"] / 0.11
-		if ft < 1.0:
-			e["flash"].visible = true
-			e["flash"].scale = Vector3.ONE * (0.35 + 1.35 * ft) * p
-			e["flash_mat"].albedo_color = Color(1.0, 0.72, 0.34, (1.0 - ft) * 0.95)
-		else:
-			e["flash"].visible = false
-		e["light"].light_energy = 5.5 * p * maxf(0.0, 1.0 - e["t"] / 0.28)
-		for sp in e["sparks"]:
-			sp["t"] += dt
-			var u: float = sp["t"] / sp["life"]
-			if u >= 1.0 or sp["t"] > 0.7:
-				sp["mi"].visible = false
-				continue
-			sp["vel"].y -= 15.0 * dt
-			sp["pos"] += sp["vel"] * dt
-			var spd: float = sp["vel"].length()
-			var dir: Vector3 = sp["vel"] / maxf(spd, 0.01)
-			var ln: float = sp["len"] * (1.0 - u * 0.55)
-			sp["mi"].transform = Transform3D(SK.basis_y(dir) * Basis.from_scale(
-				Vector3(sp["wid"], ln, sp["wid"])), sp["pos"])
-		for fr in e["frags"]:
-			fr["t"] += dt
-			var uf: float = fr["t"] / fr["life"]
-			if uf >= 1.0:
-				fr["mi"].visible = false
-				continue
-			fr["vel"].y -= 11.0 * dt
-			fr["pos"] += fr["vel"] * dt
-			var bs := Basis.from_euler(fr["spin"] * fr["t"])
-			fr["mi"].transform = Transform3D(bs * Basis.from_scale(Vector3.ONE * fr["scale"]),
-				fr["pos"])
-		for sm in e["smoke"]:
-			sm["t"] += dt
-			var us: float = sm["t"] / sm["life"]
-			if us >= 1.0:
-				sm["mi"].visible = false
-				continue
-			sm["pos"] += sm["vel"] * dt
-			sm["mi"].scale = Vector3.ONE * sm["size"] * lerpf(0.55, 1.8, us)
-			sm["mat"].albedo_color = Color(0.06, 0.052, 0.048, (1.0 - us) * 0.26)
+func _stop_cut_fx() -> void:
+	for e in _cut_fx:
+		e["sparks"].emitting = false
+		e["frags"].emitting = false
+		e["light"].light_energy = 0.0
+		e["active"] = false
+		e["sparks"].restart()
+		e["frags"].restart()
+		e["sparks"].emitting = false
+		e["frags"].emitting = false
+	for b in _bursts:
+		b["active"] = false
+		b["mi"].visible = false
 
 
+# ====================================================================== step
+# ====================================================================== step
+# ====================================================================== step
 # ====================================================================== step
 # ====================================================================== step
 
@@ -471,7 +486,6 @@ func sim_step(dt: float) -> void:
 				last_hit = "%s a%d" % [tents[i].mi.name, tents[i].attack_kind]
 	_update_trails(dt)
 	_update_fx(dt)
-	_update_cut_fx(dt)
 	rig.tick_core(dt)
 	var dirw := (target_chest - body_center).normalized()
 	var loc: Vector3 = rig.body.global_transform.basis.inverse() * dirw
@@ -675,16 +689,17 @@ func _support_min() -> int:
 
 
 func _enforce_roles(_dt: float) -> void:
-	if not auto_roles:
-		return
+	# below three limbs the body is down: this rule is part of the fight and
+	# applies even in manual/QA mode
 	if live < 3:
-		# the body has fallen: every remaining limb attacks
 		if not _fallen:
 			_fallen = true
 		for i in N_TENT:
 			var tn = tents[i]
 			if tn.alive and tn.role != "attack" and tn.role != "explode":
 				_start_fallen_attack(i)
+		return
+	if not auto_roles:
 		return
 	# keep at least support_min planted limbs; idle limbs convert first
 	var smin := _support_min()
@@ -949,6 +964,7 @@ func _spawn_impact(pos: Vector3, scale_mul: float) -> void:
 
 
 func _update_fx(dt: float) -> void:
+	_update_bursts(dt)
 	for e in _impact_pool:
 		if not e["active"]:
 			continue
@@ -1057,7 +1073,6 @@ func cut_tentacle(i: int) -> bool:
 	var base: Vector3 = tn.base
 	tn.set_explode()
 	live -= 1
-	_spawn_impact(base, 0.85)
 	if live < 3:
 		_fallen = true
 		duck = 0.0
@@ -1089,6 +1104,7 @@ func set_auto(v: bool) -> void:
 
 
 func reset_boss() -> void:
+	_stop_cut_fx()
 	live = N_TENT
 	_fallen = false
 	duck = 0.0
