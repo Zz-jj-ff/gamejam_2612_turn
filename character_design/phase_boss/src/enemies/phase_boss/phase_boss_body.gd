@@ -21,20 +21,7 @@ static func resolve(model, from: Vector3, to: Vector3, shape: Dictionary, arena:
 	var closest := Hit.closest_on_segment(floor_center, from.slide(Vector3.UP), to.slide(Vector3.UP))
 	if closest.distance_squared_to(floor_center) > BODY_REACH * BODY_REACH:
 		return to
-	var scale: float = model.global_basis.get_scale().x
-	var parts: Array[Capsule] = [
-		Capsule.new(model.chest.to_global(Vector3(0, 0.0, -1.81)),
-			model.chest.to_global(Vector3(0, 0.17, 1.35)), 2.04 * scale),
-		Capsule.new(model.chest.to_global(Vector3(0, 0.12, 1.30)),
-			model.pelvis.to_global(Vector3(0, 0.16, 1.30)), 1.64 * scale),
-		Capsule.new(model.neck.global_position, model.head.global_position, 1.24 * scale),
-		Capsule.new(model.head.global_position, model.head.to_global(Vector3(0, -0.32, -1.53)), 1.09 * scale),
-		Capsule.new(model.jaw.global_position, model.jaw.to_global(Vector3(0, -0.10, -1.78)), 0.80 * scale),
-	]
-	for leg: Dictionary in model.legs:
-		parts.append(Capsule.new(leg["root"].global_position, leg["joint"].global_position, 0.86 * scale))
-		parts.append(Capsule.new(leg["joint"].global_position, leg["distal"].global_position, 0.64 * scale))
-		parts.append(Capsule.new(leg["distal"].global_position, leg["paw"].to_global(Vector3(0, 0, -0.64)), 0.58 * scale))
+	var parts := posed_capsules(model)
 
 	var capsule_bottom: Vector3 = shape["a"] - to
 	var capsule_top: Vector3 = shape["b"] - to
@@ -56,6 +43,24 @@ static func resolve(model, from: Vector3, to: Vector3, shape: Dictionary, arena:
 			# A moving boss can trap the player against a wall. Find nearby open floor.
 			return _escape(safe, capsule_bottom, capsule_top, radius, parts, bounds)
 	return pos
+
+
+static func posed_capsules(model) -> Array[Capsule]:
+	var scale: float = model.global_basis.get_scale().x
+	var parts: Array[Capsule] = [
+		Capsule.new(model.chest.to_global(Vector3(0, 0.0, -1.81)),
+			model.chest.to_global(Vector3(0, 0.17, 1.35)), 2.04 * scale),
+		Capsule.new(model.chest.to_global(Vector3(0, 0.12, 1.30)),
+			model.pelvis.to_global(Vector3(0, 0.16, 1.30)), 1.64 * scale),
+		Capsule.new(model.neck.global_position, model.head.global_position, 1.24 * scale),
+		Capsule.new(model.head.global_position, model.head.to_global(Vector3(0, -0.32, -1.53)), 1.09 * scale),
+		Capsule.new(model.jaw.global_position, model.jaw.to_global(Vector3(0, -0.10, -1.78)), 0.80 * scale),
+	]
+	for leg: Dictionary in model.legs:
+		parts.append(Capsule.new(leg["root"].global_position, leg["joint"].global_position, 0.86 * scale))
+		parts.append(Capsule.new(leg["joint"].global_position, leg["distal"].global_position, 0.64 * scale))
+		parts.append(Capsule.new(leg["distal"].global_position, leg["paw"].to_global(Vector3(0, 0, -0.64)), 0.58 * scale))
+	return parts
 
 
 static func _separate(pos: Vector3, bottom: Vector3, top: Vector3, radius: float,

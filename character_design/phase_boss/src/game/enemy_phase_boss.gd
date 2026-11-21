@@ -6,6 +6,11 @@ const State = preload("res://src/enemies/phase_boss/phase_boss_state.gd")
 const Body = preload("res://src/enemies/phase_boss/phase_boss_body.gd")
 const BOSS_HEALTH := 12.0
 const COVER_MARGIN := 1.2
+const IMPACT_METERS := {
+	"sweep": 5.0, "tail": 5.0, "tail_left": 5.0, "phase": 5.0,
+	"pounce": 5.5, "stomp": 6.0, "high_pounce": 6.5, "run_pounce": 6.5,
+	"sprint": 7.0, "back_cannon": 6.0,
+}
 
 var rig: Node3D
 var kind := "boss"
@@ -26,6 +31,7 @@ func _ready() -> void:
 	rig = controller.model
 	controller.attack_hit.connect(_queue_attack)
 	controller.impact_shake.connect(_shake_camera)
+	controller.footfall_shake.connect(_shake_camera.bind(false))
 
 
 func spawn_fold(spawn: Transform3D, arena: Dictionary) -> void:
@@ -113,12 +119,13 @@ func melee_threat(player: PlayerUnit, margin: float) -> Dictionary:
 
 
 func _queue_attack(damage: float, blockable: bool, source: Vector3) -> void:
-	_pending = {"damage": damage, "blockable": blockable, "source": source}
+	_pending = {"damage": damage, "blockable": blockable, "source": source,
+		"displacement": IMPACT_METERS[controller.action]}
 
 
-func _shake_camera(source: Vector3, strength: float) -> void:
+func _shake_camera(source: Vector3, strength: float, accumulate := true) -> void:
 	var meters: float = source.distance_to(level.player.rig.global_position) * Controller.METERS_PER_UNIT
-	Fx.shake(strength * lerpf(1.0, 0.30, smoothstep(4.0, 30.0, meters)))
+	Fx.shake(strength * lerpf(1.0, 0.30, smoothstep(4.0, 30.0, meters)), accumulate)
 
 
 func resolve_fold_attack(player: PlayerUnit) -> Dictionary:
@@ -127,18 +134,25 @@ func resolve_fold_attack(player: PlayerUnit) -> Dictionary:
 	var attack := _pending.duplicate()
 	_pending.clear()
 	var source: Vector3 = attack["source"]
-	var push: Vector3 = player.rig.global_position - source
-	push.y = 0.0
-	if push.length_squared() < 0.001:
-		push = -rig.global_basis.z
-	push = push.normalized()
+	var player_at: Vector3 = player.rig.global_position
+	var away := (player_at - controller.ground_position()).slide(Vector3.UP).normalized()
+	var push := (player_at - source).slide(Vector3.UP).normalized()
+	# Side hits can come from the tail or paw. Keep their impulse out of the hull.
+	if push.dot(away) < 0.30:
+		push = away
+	if push.is_zero_approx():
+		push = -rig.global_basis.z.normalized()
+	var displacement: float = attack["displacement"]
 	if attack["blockable"] and P.getb("parry.melee_block") and player.is_guard_up():
 		if Combat.blade_contacts_point(player.rig, source, controller.contact_radius() + 0.25):
-			player.on_block(push, P.getf("parry.block_knockback"))
+			player.launch_impact(push, displacement)
 			return {"hit": false, "parried": true, "melee": true, "pos": source, "normal": -push, "push": push}
 	var old_hp := player.hp
 	player.hurt(attack["damage"], push, "被折相击中" if attack["blockable"] else "被折相的背炮击中")
-	return {"hit": not player.alive or player.hp < old_hp, "pos": source}
+	var hit := not player.alive or player.hp < old_hp
+	if hit:
+		player.launch_impact(push, displacement)
+	return {"hit": hit, "pos": source}
 
 
 func _trace_arena(start: Vector3, end: Vector3) -> Dictionary:

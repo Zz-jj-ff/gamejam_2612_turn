@@ -495,8 +495,8 @@ func screen_flash(strength: float, color := Color(1, 0.4, 0.25)) -> void:
 	_flash_a = maxf(_flash_a, clampf(strength, 0.0, 1.0))
 
 
-func shake(amount: float) -> void:
-	shake_amount = minf(3.5, shake_amount + amount)
+func shake(amount: float, accumulate := true) -> void:
+	shake_amount = minf(3.5, shake_amount + amount if accumulate else maxf(shake_amount, amount))
 
 
 # ------------------------------------------------------------------ projectile meshes

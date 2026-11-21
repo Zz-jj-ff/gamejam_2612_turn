@@ -1,6 +1,7 @@
 extends Node3D
 ## Visual and audio cues used by the exhibit and battle.
 
+const Body = preload("res://src/enemies/phase_boss/phase_boss_body.gd")
 const Motion = preload("res://src/enemies/phase_boss/phase_boss_motion.gd")
 const Kit = preload("res://scripts/mech/mesh_kit.gd")
 const Outline = preload("res://shaders/phase_boss_outline.gdshader")
@@ -10,7 +11,8 @@ const TRAIL_LIFE := 0.24
 var _model: Node3D
 var _pieces: Array[MeshInstance3D] = []
 var _phase_mat: ShaderMaterial
-var _ghosted := false
+var _applied_shell: ShaderMaterial
+var _piece_shadows: Array[GeometryInstance3D.ShadowCastingSetting] = []
 var _markers: Dictionary = {}
 var _coverage: Dictionary = {}
 var _energy_mesh := ImmediateMesh.new()
@@ -27,6 +29,7 @@ func configure(model: Node3D) -> void:
 	_model = model
 	for piece: MeshInstance3D in model.find_children("*", "MeshInstance3D", true, false):
 		_pieces.append(piece)
+		_piece_shadows.append(piece.cast_shadow)
 	_phase_mat = ShaderMaterial.new()
 	_phase_mat.shader = Outline
 	_warning = StandardMaterial3D.new()
@@ -67,16 +70,24 @@ func configure(model: Node3D) -> void:
 	_cue_tones["tail_sweep"] = _tone(135.0, 420.0, 0.37)
 
 
-func show_pose(pose: RefCounted, enabled: bool, time: float, playing: bool) -> void:
+func show_pose(pose: RefCounted, enabled: bool, time: float, playing: bool,
+		preview_shell: ShaderMaterial = null, preview_fade := 0.51) -> void:
 	var phase: float = pose.phase if enabled else 0.0
-	var ghosted := phase > 0.005
-	_phase_mat.set_shader_parameter("phase_amount", phase)
-	_phase_mat.set_shader_parameter("phase_time", time)
-	for piece in _pieces:
-		piece.transparency = phase * 0.51
-		if ghosted != _ghosted:
-			piece.material_overlay = _phase_mat if ghosted else null
-	_ghosted = ghosted
+	var shell := preview_shell if preview_shell != null else _phase_mat
+	if phase <= 0.005:
+		shell = null
+	if shell != null:
+		shell.set_shader_parameter("phase_amount", phase)
+		shell.set_shader_parameter("phase_time", time)
+	var fade := preview_fade if preview_shell != null else 0.51
+	for i in _pieces.size():
+		var piece := _pieces[i]
+		piece.transparency = phase * fade
+		if shell != _applied_shell:
+			piece.material_overlay = shell
+			piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if (
+				shell != null and shell != _phase_mat) else _piece_shadows[i]
+	_applied_shell = shell
 	_model.set_motion_lights(pose.charge if enabled else 0.0,
 		pose.flash if enabled else 0.0, pose.burst if enabled else 0.0, pose.cannon_heat if enabled else 0.0, phase, pose.lamp_power)
 	for key: String in _markers:
@@ -87,9 +98,10 @@ func show_pose(pose: RefCounted, enabled: bool, time: float, playing: bool) -> v
 		_warning.albedo_color = Color(1.0, 0.36 - pose.flash * 0.16, 0.075, opacity)
 	_draw_energy(pose, enabled)
 	_draw_cannon(pose, time, enabled)
-	if phase > 0.26:
-		_draw_phase_fragments(phase, time)
-	_draw_trail(time, enabled and playing, phase, float(pose.jaw_cut))
+	var trail_phase := phase if preview_shell == null else 0.0
+	if trail_phase > 0.26:
+		_draw_phase_fragments(trail_phase, time)
+	_draw_trail(time, enabled and playing, trail_phase, float(pose.jaw_cut))
 	if not enabled:
 		_audio.stop()
 
@@ -314,6 +326,13 @@ func _swept_marker(driver: Motion, clip: String, window: Array) -> MeshInstance3
 				for leg: int in [0, 2]:
 					var claw: Node3D = _model.legs[leg]["paw"]
 					points.append(claw.to_global(Vector3(0.0, -0.25, -0.96)))
+				var scale := global_basis.x.length()
+				for part: Body.Capsule in Body.posed_capsules(_model):
+					for point: Vector3 in [part.a, part.b]:
+						var spot := to_local(point)
+						for radial in 8:
+							var ray := Vector2.from_angle(TAU * float(radial) / 8.0)
+							samples.append(Vector2(spot.x, spot.z) + ray * part.radius / scale)
 		for point in points:
 			var spot := to_local(point)
 			for radial in 8:
@@ -444,10 +463,13 @@ func _draw_cannon(pose: RefCounted, time: float, enabled: bool) -> void:
 	var right := muzzle_basis.x
 	var up := muzzle_basis.y
 	var world_scale := global_basis.x.length()
-	var max_length := 31.0 / world_scale
 	var length: float = pose.cannon_range / world_scale
-	if axis.y < -0.008:
-		length = minf(length, (start.y - 0.09 / world_scale) / -axis.y)
+	var surface_hit: bool = pose.cannon_surface_hit
+	if length < 0.0:
+		var floor_range := Motion.cannon_floor_range(start, axis, -0.018)
+		surface_hit = is_finite(floor_range)
+		# The exhibit has a floor but no arena walls.
+		length = floor_range if surface_hit else 350.0 / world_scale
 	_glare.visible = true
 	_glare.position = start + axis * 0.25
 	var spectral: bool = pose.phase > 0.25
@@ -456,7 +478,7 @@ func _draw_cannon(pose: RefCounted, time: float, enabled: bool) -> void:
 	_glare.light_energy = power * power * 5.2 + shot * 14.0
 	_energy_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
 	if shot > 0.02:
-		_draw_prism_beam(start, axis, right, up, length, shot, time, spectral, length < max_length - 0.02)
+		_draw_prism_beam(start, axis, right, up, length, shot, time, spectral, surface_hit)
 	elif pose.cannon_charging:
 		for strand in 3:
 			for i in 14:
@@ -480,15 +502,17 @@ func _draw_prism_beam(start: Vector3, axis: Vector3, right: Vector3, up: Vector3
 	_beam_tube(start, end, right, up, 0.68 * shot * flicker, Color(outer, 0.28))
 	_beam_tube(start, end, right, up, 0.43 * shot, Color(outer.lerp(inner, 0.50), 0.52))
 	_beam_tube(start, end, right, up, 0.23 * shot * flicker, Color(inner, 0.97))
+	var slices := clampi(ceili(length * 1.5), 23, 128)
 	for strand in 3:
 		var spin := time * (13.0 + strand * 2.3) + TAU * strand / 3.0
-		for i in 23:
-			var a := float(i) / 23.0
-			var b := float(i + 1) / 23.0
+		for i in slices:
+			var a := float(i) / slices
+			var b := float(i + 1) / slices
 			var r := (0.60 + 0.31 * sin(PI * a)) * shot
-			var twist := spin + a * 15.0
+			var twist := spin + a * length * 0.63
+			var next_twist := spin + b * length * 0.63
 			var p := start + axis * (length * a) + (right * cos(twist) + up * sin(twist)) * r
-			var q := start + axis * (length * b) + (right * cos(twist + 0.73) + up * sin(twist + 0.73)) * r
+			var q := start + axis * (length * b) + (right * cos(next_twist) + up * sin(next_twist)) * r
 			var width := (right * cos(twist) + up * sin(twist)) * (0.085 + 0.025 * sin(twist))
 			_energy_strip(p, q, width, Color(inner.lerp(outer, 0.26 + 0.18 * strand), shot * 0.78))
 	for i in 9:

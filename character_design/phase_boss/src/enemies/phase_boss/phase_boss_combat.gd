@@ -3,7 +3,9 @@ extends Node3D
 
 signal attack_hit(amount: float, blockable: bool, source: Vector3)
 signal impact_shake(source: Vector3, strength: float)
+signal footfall_shake(source: Vector3, strength: float)
 
+const Body = preload("res://src/enemies/phase_boss/phase_boss_body.gd")
 const Model = preload("res://scenes/phase_boss/phase_boss_model.tscn")
 const Motion = preload("res://src/enemies/phase_boss/phase_boss_motion.gd")
 const PhaseState = preload("res://src/enemies/phase_boss/phase_boss_state.gd")
@@ -228,9 +230,9 @@ func melee_forecast(capsule: Dictionary, margin: float, lead: float) -> Dictiona
 		var path := PackedVector3Array()
 		for point: Vector3 in entry[0]:
 			path.append(_actor.to_global(point + Vector3.BACK * shift))
-		if not _path_hits(path, bottom, top, float(entry[1]) * BOSS_SCALE + radius + margin):
+		var source := _strike_source(path, bottom, top, float(entry[1]) * BOSS_SCALE + radius + margin, entry[4])
+		if not source.is_finite():
 			continue
-		var source := _nearest_contact(path, center)
 		var threat := _contact_threat(source, bottom, top, radius + margin * 0.45, eta)
 		if not threat.is_empty():
 			return threat
@@ -973,32 +975,29 @@ func _aim_cannon(p: Motion.Pose, player: Vector3, delta: float) -> void:
 	_motion.apply(p)
 	var source := muzzle.global_position
 	var direction := -muzzle.global_basis.z.normalized()
-	var depth := 31.0 if direction.y >= -0.008 else minf(31.0, (source.y - 0.09) / -direction.y)
-	var obstacle := _ray(source, source + direction * depth)
-	p.cannon_range = depth if obstacle.is_empty() else source.distance_to(obstacle["position"])
+	var floor_range := Motion.cannon_floor_range(source, direction, ground_position().y)
+	# The search ray reaches beyond any wall of the arena, even along a diagonal.
+	var trace_range := 4.0 * arena_half_extent / maxf(0.01, direction.slide(Vector3.UP).length())
+	var limit := minf(floor_range, trace_range)
+	var obstacle := _ray(source, source + direction * limit)
+	p.cannon_range = limit if obstacle.is_empty() else source.distance_to(obstacle["position"])
+	p.cannon_surface_hit = not obstacle.is_empty() or floor_range <= trace_range
 
 
 func _emit_impact_shake(before: float) -> void:
-	var contact: float
-	var strength: float
+	for foot in Motion.sprint_footfalls(action, before, action_time):
+		footfall_shake.emit(model.legs[foot]["paw"].global_position, Motion.SPRINT_FOOT_SHAKES[foot])
+	var strength := Motion.impact_shake(action, before, action_time)
+	if strength <= 0.0:
+		return
+	var source := _actor.to_global(_pose.impact_position)
 	match action:
-		"stomp":
-			contact = Motion.STOMP_IMPACT
-			strength = 1.4
-		"pounce":
-			contact = Motion.SHORT_POUNCE_LAND
-			strength = 1.45
-		"high_pounce", "run_pounce":
-			contact = Motion.LEAP_CONTACT + (Motion.RUN_IN if action == "run_pounce" else 0.0)
-			strength = 2.0
 		"back_cannon":
-			contact = Motion.CANNON_FIRE
-			strength = 1.75
-		_:
-			return
-	if before < contact and action_time >= contact:
-		var source: Vector3 = model.cannon.muzzle.global_position if action == "back_cannon" else _actor.to_global(_pose.impact_position)
-		impact_shake.emit(source, strength)
+			source = model.cannon.muzzle.global_position
+		"rush_turn":
+			var front_paw := 2 if _turn_degrees > 0.0 else 0
+			source = model.legs[front_paw]["paw"].global_position
+	impact_shake.emit(source, strength)
 
 
 func _resolve_attack(player: Vector3, delta: float, capsule: Dictionary, past_nose: PackedVector3Array) -> void:
@@ -1022,26 +1021,31 @@ func _resolve_attack(player: Vector3, delta: float, capsule: Dictionary, past_no
 		_cannon_tick = maxf(0.0, _cannon_tick - delta)
 		if action_time >= Motion.CANNON_FIRE and action_time < Motion.CANNON_RELEASE and _cannon_tick <= 0.0:
 			var muzzle: Marker3D = model.cannon.muzzle
-			if _within(muzzle.global_position, muzzle.global_position - muzzle.global_basis.z.normalized() * _pose.cannon_range,
-					bottom, top, body_radius + 0.44 * BOSS_SCALE):
+			var source := muzzle.global_position
+			var end := source - muzzle.global_basis.z.normalized() * _pose.cannon_range
+			var contact := Geometry3D.get_closest_points_between_segments(source, end, bottom, top)
+			var reach := body_radius + 0.44 * BOSS_SCALE
+			if contact[0].distance_squared_to(contact[1]) <= reach * reach and _ray(source, contact[1]).is_empty():
 				_cannon_tick = 0.28
-				attack_hit.emit(15.0, false, muzzle.global_position)
+				attack_hit.emit(15.0, false, source)
 		return
 	var windows: Array = Motion.CONTACT_WINDOWS.get(action, [])
 	for i in windows.size():
 		var window: Array = windows[i]
 		if action_time < window[1] or action_time > window[2] or _hit_windows.has(i):
 			continue
-		var hit := false
-		var points := _attack_path(window[0])
-		if Motion.tail_sweep_direction(action) != 0.0:
-			hit = _motion.tail_sweep_overlaps(action, action_time, bottom, top, body_radius)
-		else:
-			hit = _path_hits(points, bottom, top, _attack_radius(action, window, action_time) * BOSS_SCALE + body_radius)
-		var source := _nearest_contact(points, (bottom + top) * 0.5)
-		if hit and _ray(source, (bottom + top) * 0.5).is_empty():
-			_hit_windows[i] = true
-			attack_hit.emit(DAMAGE[action], true, source)
+		var center := (bottom + top) * 0.5
+		var directional_tail := Motion.tail_sweep_direction(action) != 0.0
+		if directional_tail and not _motion.tail_sweep_overlaps(action, action_time, bottom, top, body_radius):
+			continue
+		for shape: Array in _attack_shapes(window[0], _attack_radius(action, window, action_time)):
+			var path: PackedVector3Array = shape[0]
+			var reach := float(shape[1]) * BOSS_SCALE + body_radius
+			var source := _nearest_contact(path, center) if directional_tail else _strike_source(path, bottom, top, reach, shape[2])
+			if source.is_finite() and _ray(source, center).is_empty():
+				_hit_windows[i] = true
+				attack_hit.emit(DAMAGE[action], true, source)
+				break
 
 
 func _build_contact_catalog() -> void:
@@ -1052,10 +1056,11 @@ func _build_contact_catalog() -> void:
 				var at := lerpf(window[1], window[2], float(sample) / 11.0)
 				var pose := _motion.sample(clip, at)
 				_motion.apply(pose)
-				var points := _attack_path(window[0])
-				for i in points.size():
-					points[i] = _actor.to_local(points[i])
-				entries.append([points, _attack_radius(clip, window, at), at, pose.position.z])
+				for shape: Array in _attack_shapes(window[0], _attack_radius(clip, window, at)):
+					var points: PackedVector3Array = shape[0]
+					for i in points.size():
+						points[i] = _actor.to_local(points[i])
+					entries.append([points, shape[1], at, pose.position.z, shape[2]])
 		_contacts[clip] = entries
 
 
@@ -1068,6 +1073,14 @@ func _covers(clip: String, bottom: Vector3, top: Vector3, radius: float) -> bool
 
 func _attack_radius(clip: String, window: Array, time: float) -> float:
 	return Motion.stomp_radius_at(time) if clip == "stomp" else float(window[3])
+
+
+func _attack_shapes(kind: String, radius: float) -> Array:
+	var shapes := [[_attack_path(kind), radius, false]]
+	if kind == "pounce":
+		for part: Body.Capsule in Body.posed_capsules(model):
+			shapes.append([PackedVector3Array([part.a, part.b]), part.radius / BOSS_SCALE, true])
+	return shapes
 
 
 func _attack_path(kind: String) -> PackedVector3Array:
@@ -1097,6 +1110,20 @@ func _hurt_volumes() -> Array:
 	for volume: Array in volumes:
 		volume[2] = float(volume[2]) * BOSS_SCALE
 	return volumes
+
+
+static func _strike_source(path: PackedVector3Array, bottom: Vector3, top: Vector3,
+		reach: float, downward: bool) -> Vector3:
+	var center := (bottom + top) * 0.5
+	if not downward:
+		return _nearest_contact(path, center) if _path_hits(path, bottom, top, reach) else Vector3.INF
+	# A landing part hits down to the floor, including players below the raised chassis.
+	if bottom.y > maxf(path[0].y, path[1].y) + reach:
+		return Vector3.INF
+	var a := Vector3(path[0].x, center.y, path[0].z)
+	var b := Vector3(path[1].x, center.y, path[1].z)
+	var source := Geometry3D.get_closest_point_to_segment(center, a, b)
+	return source if source.distance_squared_to(center) <= reach * reach else Vector3.INF
 
 
 static func _path_hits(points: PackedVector3Array, bottom: Vector3, top: Vector3, radius: float) -> bool:

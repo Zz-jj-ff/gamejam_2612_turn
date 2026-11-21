@@ -8,9 +8,16 @@ const Vesper = preload("res://scripts/mech/mech_rig.gd")
 const Kit = preload("res://scripts/mech/mesh_kit.gd")
 const PreviewFloor = preload("res://gfx/preview_floor.gdshader")
 const StudioSky = preload("res://gfx/studio_sky.gdshader")
+const PHASE_APPEARANCES := [
+	["原版 · 青紫切面", null, 0.51, "青紫切片、离体薄片和运动残光。"],
+	["折射隐身", preload("res://shaders/phase_preview_refraction.gdshader"), 0.99, "背后的景物穿过轮廓时会弯折，边缘有轻微色散。"],
+	["棱镜反光", preload("res://shaders/phase_preview_prism.gdshader"), 0.85, "装甲保留体积，高光随观察角度变色。"],
+	["青白光流", preload("res://shaders/phase_preview_lightflow.gdshader"), 0.84, "透明机身上有流动的青白扫描线。"],
+]
 const FOCUS := Vector3(0, 2.45, 0.54)
 const WIDE := 10.4
 enum ViewMode { NORMAL, PHASED, GAZE }
+enum PhaseAppearance { ORIGINAL, REFRACTION, PRISM, LIGHTFLOW }
 
 var model: Node3D
 var reference: Node3D
@@ -35,9 +42,15 @@ var _time_label: Label
 var _state_label: Label
 var _camera_hint: Label
 var _view_mode := ViewMode.NORMAL
+var _mode_picker: OptionButton
+var _appearance_picker: OptionButton
+var _appearance := PhaseAppearance.ORIGINAL
+var _phase_light: OmniLight3D
+var _appearance_material: ShaderMaterial
 var _phase_state := PhaseState.new()
 var _look_angles := Vector2.ZERO
 var _phase_clock := 0.0
+var _preview_shake := 0.0
 
 
 func _ready() -> void:
@@ -66,6 +79,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_phase_clock += delta
+	_preview_shake = move_toward(_preview_shake, 0.0, delta * 5.4)
 	if _view_mode == ViewMode.GAZE:
 		var previous_stage := _phase_state.stage
 		var before_age := _phase_state.age
@@ -84,6 +98,7 @@ func _process(delta: float) -> void:
 			_time = minf(_time + delta * _speed * (Motion.phase_rate(_clip_code()) if boosted else 1.0), _duration())
 		if _effects:
 			_fx.advance_audio(_clip_code(), before, _time)
+			_advance_preview_shake(_clip_code(), before, _time)
 		if _time >= _duration():
 			_set_playing(false)
 		_apply_motion()
@@ -92,6 +107,12 @@ func _process(delta: float) -> void:
 		_apply_motion()
 	elif _view_mode != ViewMode.NORMAL:
 		_apply_motion()
+
+
+func _advance_preview_shake(clip: String, before: float, after: float) -> void:
+	for foot in Motion.sprint_footfalls(clip, before, after):
+		_preview_shake = maxf(_preview_shake, Motion.SPRINT_FOOT_SHAKES[foot])
+	_preview_shake = maxf(_preview_shake, Motion.impact_shake(clip, before, after))
 
 
 func _boss_in_view() -> bool:
@@ -118,11 +139,16 @@ func _duration() -> float:
 
 func _set_playing(active: bool) -> void:
 	_playing = active
+	if not active:
+		_preview_shake = 0.0
+		camera.h_offset = 0.0
+		camera.v_offset = 0.0
 	_play.text = "暂停" if active else ("重播" if _time >= _duration() else "播放")
 
 
 func _select_clip(index: int, play: bool = true) -> void:
 	_clip_index = index
+	_preview_shake = 0.0
 	_picker.select(index)
 	_time = 0.0
 	_timeline.max_value = _duration()
@@ -172,7 +198,12 @@ func _apply_motion() -> void:
 				PhaseState.Stage.RETURNING:
 					_motion.return_from_phase(pose, _phase_state.age)
 	_motion.apply(pose)
-	_fx.show_pose(pose, _effects, _phase_clock if _view_mode != ViewMode.NORMAL else _time, _playing)
+	var effect_time := _phase_clock if _view_mode != ViewMode.NORMAL else _time
+	if _appearance == PhaseAppearance.LIGHTFLOW:
+		_appearance_material.set_shader_parameter("phase_origin", model.global_position)
+		_appearance_material.set_shader_parameter("phase_axis", model.global_basis.z.normalized())
+	_update_phase_light(pose.phase, effect_time)
+	_fx.show_pose(pose, _effects, effect_time, _playing, _appearance_material, PHASE_APPEARANCES[_appearance][2])
 	_timeline.set_value_no_signal(_time)
 	_time_label.text = "%.2f / %.2f 秒" % [_time, _duration()]
 	_state_label.text = pose.signal_name
@@ -245,6 +276,9 @@ func _update_camera() -> void:
 		camera.rotate_object_local(Vector3.UP, _look_angles.x)
 		camera.rotate_object_local(Vector3.RIGHT, _look_angles.y)
 	camera.size = _zoom + extra_size
+	var shake := _preview_shake if _playing and _effects else 0.0
+	camera.h_offset = sin(_phase_clock * 97.0) * shake * 0.10
+	camera.v_offset = cos(_phase_clock * 111.0) * shake * 0.14
 
 
 func _build_controls() -> void:
@@ -305,6 +339,46 @@ func _build_controls() -> void:
 		get_tree().change_scene_to_file("res://scenes/phase_boss/phase_boss_battle.tscn"))
 
 	_build_playback_controls(ui)
+	_build_appearance_picker(ui)
+
+
+func _build_appearance_picker(ui: Control) -> void:
+	var row := HBoxContainer.new()
+	ui.add_child(row)
+	row.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	row.offset_left = -306
+	row.offset_right = -30
+	row.offset_top = 27
+	row.add_theme_constant_override("separation", 12)
+	var label := Label.new()
+	label.text = "虚化外观"
+	label.modulate = Color("bbc8ce")
+	row.add_child(label)
+	_appearance_picker = OptionButton.new()
+	_appearance_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for index in PHASE_APPEARANCES.size():
+		var option: Array = PHASE_APPEARANCES[index]
+		_appearance_picker.add_item(option[0])
+		_appearance_picker.get_popup().set_item_tooltip(index, option[3])
+	_appearance_picker.tooltip_text = PHASE_APPEARANCES[0][3]
+	_appearance_picker.item_selected.connect(_set_phase_appearance)
+	row.add_child(_appearance_picker)
+
+
+func _set_phase_appearance(index: int) -> void:
+	_appearance = index as PhaseAppearance
+	_appearance_picker.tooltip_text = PHASE_APPEARANCES[index][3]
+	_appearance_material = null
+	if PHASE_APPEARANCES[index][1] != null:
+		_appearance_material = ShaderMaterial.new()
+		_appearance_material.shader = PHASE_APPEARANCES[index][1]
+		_appearance_material.render_priority = 2
+	if _view_mode == ViewMode.NORMAL:
+		_mode_picker.select(ViewMode.PHASED)
+		_set_view_mode(ViewMode.PHASED)
+	else:
+		_apply_motion()
+
 
 func _build_playback_controls(ui: Control) -> void:
 	var card := PanelContainer.new()
@@ -352,11 +426,11 @@ func _build_playback_controls(ui: Control) -> void:
 		_effects = active
 		_apply_motion())
 	row.add_child(effects)
-	var mode := OptionButton.new()
+	_mode_picker = OptionButton.new()
 	for caption: String in ["动作预览", "持续虚化", "视线测试"]:
-		mode.add_item(caption)
-	mode.item_selected.connect(_set_view_mode)
-	row.add_child(mode)
+		_mode_picker.add_item(caption)
+	_mode_picker.item_selected.connect(_set_view_mode)
+	row.add_child(_mode_picker)
 	_state_label = Label.new()
 	_state_label.modulate = Color("ade6ff")
 	row.add_child(_state_label)
@@ -424,6 +498,26 @@ func _build_stage() -> void:
 	_fill(Vector3(4, 4.7, -8.4), Color("bbf0ff"), 5.6)
 	_fill(Vector3(-6.4, 7.8, 5.6), Color("acc6ff"), 6.5)
 	_fill(Vector3(4.1, 6.0, 7.1), Color("ffe1ba"), 3.4)
+	_phase_light = OmniLight3D.new()
+	_phase_light.omni_range = 7.0
+	_phase_light.omni_attenuation = 1.65
+	_phase_light.hide()
+	add_child(_phase_light)
+
+
+func _update_phase_light(phase: float, time: float) -> void:
+	_phase_light.visible = _effects and phase > 0.015 and _appearance in [PhaseAppearance.PRISM, PhaseAppearance.LIGHTFLOW]
+	if not _phase_light.visible:
+		return
+	if _appearance == PhaseAppearance.PRISM:
+		_phase_light.global_position = model.to_global(Vector3(0, 1.10, -0.82))
+		_phase_light.light_color = Color("529ce9").lerp(Color("ad75e5"), 0.5 + 0.5 * sin(time * 1.4))
+		_phase_light.light_energy = phase * 2.2
+	else:
+		var progress := fposmod(time * 0.72, 1.0)
+		_phase_light.global_position = model.to_global(Vector3(0, 1.08, (progress - 0.5) / 0.071))
+		_phase_light.light_color = Color("66dfff")
+		_phase_light.light_energy = phase * 3.4 * sin(progress * PI)
 
 
 func _fill(at: Vector3, color: Color, energy: float) -> void:

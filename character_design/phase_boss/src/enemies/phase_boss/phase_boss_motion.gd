@@ -24,6 +24,8 @@ const RUSH_TURN_MAX_DEGREES := 150.0
 const SHORT_POUNCE_TAKEOFF := 0.747
 const SHORT_POUNCE_LAND := 1.19
 const SPRINT_PERIOD := 0.60
+const SPRINT_LAND_PHASES := [0.51, 0.0, 0.70, 0.18]
+const SPRINT_FOOT_SHAKES := [0.38, 0.24, 0.38, 0.24]
 const SPRINT_SPEED := 14.25
 const RUN_IN := SPRINT_PERIOD * 2.16
 const RUN_GATHER_DISTANCE := 4.35
@@ -52,6 +54,14 @@ const TAIL_SWEEP_TIME_CUT := 0.15
 const TAIL_CONTACT_BEGIN := TAIL_STRIKE + MELEE_WINDUP_EXTENSION
 const TAIL_CONTACT_END := 1.19 + MELEE_WINDUP_EXTENSION - TAIL_SWEEP_TIME_CUT
 const TAIL_DURATION := 1.87 + MELEE_WINDUP_EXTENSION - TAIL_SWEEP_TIME_CUT
+const IMPACT_SHAKES := {
+	"rush_turn": [RUSH_TURN_LAND, 1.18],
+	"stomp": [STOMP_IMPACT, 1.40],
+	"pounce": [SHORT_POUNCE_LAND, 2.55],
+	"high_pounce": [LEAP_CONTACT, 3.12],
+	"run_pounce": [RUN_IN + LEAP_CONTACT, 3.12],
+	"back_cannon": [CANNON_FIRE, 1.75],
+}
 const ROAR_DURATION := 3.20
 const ROAR_SOUND_TIME := 0.37
 const ROAR_SOUND_DURATION := 2.46
@@ -148,7 +158,8 @@ class Pose:
 	var cannon_shot := 0.0
 	var cannon_charging := false
 	var cannon_locked := false
-	var cannon_range := 31.0
+	var cannon_range := -1.0
+	var cannon_surface_hit := false
 	var cannon_yaw := 0.0
 
 var model: Node3D
@@ -401,22 +412,21 @@ func _gait(p: Pose, t: float, trot: bool) -> void:
 func _sprint(p: Pose, t: float) -> void:
 	var cycle := t / SPRINT_PERIOD
 	var phase := fposmod(cycle, 1.0)
-	const LEFT_FORE := 0.51
-	const RIGHT_FORE := 0.70
-	const RIGHT_HIND := 0.18
+	var left_fore: float = SPRINT_LAND_PHASES[0]
+	var right_fore: float = SPRINT_LAND_PHASES[2]
+	var right_hind: float = SPRINT_LAND_PHASES[3]
 	const SUPPORT := 0.26
-	var contacts := [LEFT_FORE, 0.0, RIGHT_FORE, RIGHT_HIND]
 	var stride := SPRINT_SPEED * SPRINT_PERIOD
 	# The shoulders yield under the forefeet before the hind pair drives the next stride.
-	var receive := _pulse(LEFT_FORE, 0.67, 0.75, 0.91, phase)
-	var drive := _pulse(RIGHT_HIND, 0.35, 0.42, LEFT_FORE, phase)
-	var extended := _lift(inverse_lerp(RIGHT_HIND + SUPPORT, LEFT_FORE, phase), 0.12)
-	var folded := _lift(inverse_lerp(RIGHT_FORE + SUPPORT, 1.0, phase), 0.065)
+	var receive := _pulse(left_fore, 0.67, 0.75, 0.91, phase)
+	var drive := _pulse(right_hind, 0.35, 0.42, left_fore, phase)
+	var extended := _lift(inverse_lerp(right_hind + SUPPORT, left_fore, phase), 0.12)
+	var folded := _lift(inverse_lerp(right_fore + SUPPORT, 1.0, phase), 0.065)
 	var gather := cos((phase + 0.03) * TAU)
-	var fore_load := _pulse(LEFT_FORE, 0.56, 0.65, LEFT_FORE + SUPPORT, phase) \
-		- _pulse(RIGHT_FORE, 0.76, 0.85, RIGHT_FORE + SUPPORT, phase)
+	var fore_load := _pulse(left_fore, 0.56, 0.65, left_fore + SUPPORT, phase) \
+		- _pulse(right_fore, 0.76, 0.85, right_fore + SUPPORT, phase)
 	var hind_load := _pulse(0.0, 0.05, 0.14, SUPPORT, phase) \
-		- _pulse(RIGHT_HIND, 0.24, 0.32, RIGHT_HIND + SUPPORT, phase)
+		- _pulse(right_hind, 0.24, 0.32, right_hind + SUPPORT, phase)
 	p.position.z = -SPRINT_SPEED * t
 	p.chest = Vector3(-0.09 * fore_load - 0.045 * hind_load,
 		-0.32 - 0.20 * receive + 0.12 * drive + extended + folded,
@@ -428,13 +438,43 @@ func _sprint(p: Pose, t: float) -> void:
 	p.tail_lift = -5.5 + 5.0 * sin((phase - 0.13) * TAU)
 	p.tail_sweep = 8.0 * sin((phase - 0.20) * TAU)
 	for i in 4:
-		var elapsed: float = cycle - contacts[i]
+		var land_phase: float = SPRINT_LAND_PHASES[i]
+		var elapsed := cycle - land_phase
 		var step_number := floorf(elapsed)
-		var first: float = -stride * (step_number + contacts[i] + 0.5 * SUPPORT)
+		var first := -stride * (step_number + land_phase + 0.5 * SUPPORT)
 		var swing := clampf(inverse_lerp(SUPPORT, 1.0, elapsed - step_number), 0.0, 1.0)
 		var flight := _lift(swing, 0.62 if i % 2 == 0 else 0.87)
 		p.paw_positions[i] += Vector3(0, flight, first - stride * smoothstep(0.0, 1.0, swing))
 		p.paw_angles[i] = sin(swing * TAU) * minf(16.0, flight * 17.0)
+
+
+static func sprint_footfalls(clip: String, before: float, after: float) -> PackedInt32Array:
+	var feet := PackedInt32Array()
+	if clip == "run_pounce":
+		after = minf(after, RUN_IN)
+	elif clip != "sprint":
+		return feet
+	if after <= before:
+		return feet
+	for i in SPRINT_LAND_PHASES.size():
+		var land_phase: float = SPRINT_LAND_PHASES[i]
+		var previous_stride := floori(before / SPRINT_PERIOD - land_phase + 0.000001)
+		var current_stride := floori(after / SPRINT_PERIOD - land_phase + 0.000001)
+		for stride in range(previous_stride + 1, current_stride + 1):
+			feet.append(i)
+	return feet
+
+
+static func impact_shake(clip: String, before: float, after: float) -> float:
+	var cue: Array = IMPACT_SHAKES.get(clip, [])
+	if cue.is_empty():
+		return 0.0
+	var at: float = cue[0]
+	return cue[1] if before < at and after >= at else 0.0
+
+
+static func cannon_floor_range(source: Vector3, direction: Vector3, floor_y: float) -> float:
+	return maxf(0.0, (source.y - floor_y) / -direction.y) if direction.y < -0.000001 else INF
 
 
 func _high_pounce(p: Pose, t: float) -> void:

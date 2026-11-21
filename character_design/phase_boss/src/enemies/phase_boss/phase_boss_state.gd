@@ -5,7 +5,7 @@ enum Stage { SOLID, ENTERING, PHASED, RETURNING }
 
 const CHARGE_TIME := 10.0
 const LOOK_AWAY_GRACE := 0.15
-const DRAIN_TIME := 1.6
+const DRAIN_TIME := 12.0
 const ENTER_TIME := 0.48
 const ACTIVE_TIME := 24.0
 const RETURN_TIME := 0.52

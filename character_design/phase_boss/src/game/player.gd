@@ -14,6 +14,9 @@ const Rig = preload("res://src/vesper/mech_rig.gd")
 const PAL = preload("res://src/vesper/material_palette.gd")
 # 直接 preload：不依赖全局类缓存，headless / 首次 clone 都能跑
 const InterceptS = preload("res://src/game/intercept.gd")
+const Units = preload("res://src/core/units.gd")
+const IMPACT_SLIDE_TIME := 0.52
+const IMPACT_BRACE_TIME := 0.28
 
 const PALETTE := {
 	"tag": "hero",
@@ -31,6 +34,8 @@ var alive := true
 var parry_timer := 0.0        # 剩余弹反窗口
 var parry_cd := 0.0
 var block_push := Vector3.ZERO   # 格挡成功后被推开的残余速度
+var _impact_slide := Vector3.ZERO
+var _impact_elapsed := IMPACT_SLIDE_TIME
 var last_attack := ""
 var pending_hitstop := 0.0
 var hurt_flash := 0.0
@@ -115,6 +120,7 @@ func step(dt: float, arena: Dictionary, enemies: Array = []) -> void:
 	var right := Vector3(cos(cam_yaw), 0, -sin(cam_yaw))
 	var dir := right * mv.x + fwd * (-mv.y)
 
+	var impact_control := smoothstep(IMPACT_BRACE_TIME, IMPACT_SLIDE_TIME, _impact_elapsed)
 	var mag := clampf(mv.length(), 0.0, 1.0)
 	if mag > 0.15:
 		run_hold += dt
@@ -128,7 +134,7 @@ func step(dt: float, arena: Dictionary, enemies: Array = []) -> void:
 	if rig.jump_state == "AIR" or rig.jump_state == "LANDING":
 		move_speed *= P.getf("move.air_control")
 	if dir.length() > 0.15:
-		rig.move_command = dir.normalized() * move_speed
+		rig.move_command = dir.normalized() * move_speed * impact_control
 	else:
 		rig.move_command = Vector3.ZERO
 
@@ -159,7 +165,7 @@ func step(dt: float, arena: Dictionary, enemies: Array = []) -> void:
 		rig.jump_vel = P.jump_velocity()
 		rig.request_jump()
 		jump_buffer_dt = 0.0
-	if B.just("dash"):
+	if B.just("dash") and _impact_elapsed >= IMPACT_BRACE_TIME:
 		rig.request_dash()
 	if B.just("parry"):
 		_begin_parry()
@@ -198,13 +204,14 @@ func step(dt: float, arena: Dictionary, enemies: Array = []) -> void:
 	rig.advance(dt)
 	# 攻击中允许按 move.attack_drag 慢慢位移（rig 在攻击时会锁住位移）
 	if rig.is_attacking and dir.length() > 0.15:
-		rig.position += dir.normalized() * (P.getf("move.run_speed") * P.getf("move.attack_drag")) * dt
+		rig.position += dir.normalized() * (P.getf("move.run_speed") * P.getf("move.attack_drag")) * dt * impact_control
 	# 格挡击退：被架住的那一刀把人推开
 	if block_push.length_squared() > 0.0001:
 		rig.position += block_push * dt
 		block_push *= exp(-7.0 * dt)
 		if block_push.length() < 0.05:
 			block_push = Vector3.ZERO
+	step_impact(dt, arena)
 	_swing_prev_xf = _last_swing_before
 	_swing_cur_xf = rig.weapon_xf
 
@@ -297,6 +304,27 @@ func on_block(push_dir: Vector3, speed: float) -> void:
 	if d.length_squared() < 0.0001:
 		d = -rig.global_transform.basis.z
 	block_push = d.normalized() * maxf(speed, 0.0)
+
+
+func launch_impact(push_dir: Vector3, distance_meters: float) -> void:
+	_impact_slide = push_dir.slide(Vector3.UP).normalized() * Units.to_units(distance_meters)
+	_impact_elapsed = 0.0
+	block_push = Vector3.ZERO
+	rig.speed = 0.0
+	rig.dash_time = 0.0
+
+
+func step_impact(dt: float, arena: Dictionary) -> void:
+	if _impact_elapsed >= IMPACT_SLIDE_TIME:
+		return
+	var previous := 1.0 - _impact_elapsed / IMPACT_SLIDE_TIME
+	_impact_elapsed = minf(_impact_elapsed + dt, IMPACT_SLIDE_TIME)
+	var remaining := 1.0 - _impact_elapsed / IMPACT_SLIDE_TIME
+	# Integrate the easing curve so the displacement is the same at different frame rates.
+	var from: Vector3 = rig.global_position
+	rig.global_position += _impact_slide * (previous * previous * previous - remaining * remaining * remaining)
+	_clamp_to_arena(arena)
+	rig.weapon_xf = rig.weapon_xf.translated(rig.global_position - from)
 
 
 func _on_footstep(pos: Vector3, strength: float) -> void:
@@ -464,6 +492,8 @@ func reset(pos: Transform3D) -> void:
 	parry_timer = 0.0
 	parry_cd = 0.0
 	block_push = Vector3.ZERO
+	_impact_slide = Vector3.ZERO
+	_impact_elapsed = IMPACT_SLIDE_TIME
 	last_cause = ""
 	_end_intercept()
 	rig.reset_demo(pos.origin, pos.basis.get_euler().y)

@@ -246,6 +246,8 @@ func _process(delta: float) -> void:
 		player.step(dt, level.arena, level.enemies)
 		if fold != null:
 			fold.block_player_motion(player, from)
+	elif fold != null:
+		player.step_impact(dt, level.arena)
 	level.step(dt, ctx)
 	if fold != null and player.alive:
 		fold.block_player_motion(player, player.rig.global_position)
