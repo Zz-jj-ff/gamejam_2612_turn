@@ -27,7 +27,6 @@
 | `character_design/arc_sentinel/` | ARC // SENTINEL v3 | 普通近战小怪 · 三角履带炮塔 |
 | `character_design/shard_phantom/` | SHARD // PHANTOM | 位移敌人 · 模块化悬浮人形 |
 | `character_design/boss/` | LEVIATHAN // ABYSSAL WARDEN | 最终 Boss · 机械章鱼 |
-| `character_design/girl_head/` | 少女头部 | 程序化头部/发型建模与材质实验 |
 | `character_design/weapon_electricity_sword/` | 电弧剑 | 电弧场 / ribbon 独立资产 |
 | `character_design/_kit_template/` | 套件模板 | 新建角色工程的共享骨架 |
 
