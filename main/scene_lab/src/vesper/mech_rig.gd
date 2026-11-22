@@ -70,6 +70,7 @@ var is_attacking := false
 var attack_time := 0.0
 var dash_time := 0.0
 var jump_state := "GROUND"
+var ground_y := 0.0
 var jump_t := 0.0
 var vertical_velocity := 0.0
 var air_time := 0.0
@@ -635,6 +636,18 @@ func _build_leg(index: int, az: float) -> void:
 	})
 
 
+# --------------------------------------------------------------------- 支撑
+func foot_points_xz() -> Array:
+	## 四只脚（ankle）在世界空间的水平投影，用于平台支撑凸包。
+	var pts: Array = []
+	for l in legs:
+		var n: Node3D = l.get("ankle", null)
+		if n != null and is_instance_valid(n):
+			var p := n.global_position
+			pts.append(Vector2(p.x, p.z))
+	return pts
+
+
 # --------------------------------------------------------------------- arms
 func _build_arms() -> void:
 	# right first, so arms[0] always receives the upper (right) grip
@@ -850,6 +863,13 @@ func request_jump() -> void:
 
 
 func _advance_jump(dt: float) -> void:
+	if jump_state == "GROUND":
+		if position.y > ground_y + 0.02:
+			jump_state = "AIR"
+			vertical_velocity = 0.0
+			air_time = 0.0
+		elif position.y < ground_y:
+			position.y = ground_y
 	match jump_state:
 		"TAKEOFF":
 			jump_t += dt
@@ -863,8 +883,8 @@ func _advance_jump(dt: float) -> void:
 			air_time += dt
 			vertical_velocity -= grav * dt
 			position.y += vertical_velocity * dt
-			if position.y <= 0.0 and vertical_velocity < 0.0:
-				position.y = 0.0
+			if position.y <= ground_y and vertical_velocity < 0.0:
+				position.y = ground_y
 				jump_state = "LANDING"
 				jump_t = 0.0
 				vertical_velocity = 0.0

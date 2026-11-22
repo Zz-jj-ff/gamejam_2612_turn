@@ -37,6 +37,9 @@ extends RefCounted
 
 const Art := preload("res://src/arena/arena_art.gd")
 const EnvKit := preload("res://src/arena/arena_env.gd")
+const WarehouseArena := preload("res://src/warehouse/warehouse_arena.gd")
+const PanopticonArena := preload("res://src/panopticon/panopticon_arena.gd")
+const WardArena := preload("res://src/ward/ward_arena.gd")
 
 const ALLEY := "alley"
 const PLAZA := "plaza"
@@ -50,6 +53,12 @@ static func build(kind: String, origin := Vector3.ZERO) -> Dictionary:
 	# 三关都是湿夜里；湿润度用同一值，避免共享材质在关卡间“串味”
 	Mats.sun(1.0, 0.88)
 	match kind:
+		"warehouse":
+			return WarehouseArena.build(origin)
+		"panopticon":
+			return PanopticonArena.build(origin)
+		"ward":
+			return WardArena.build(origin)
 		PLAZA:
 			return _plaza(origin)
 		CHAMBER:

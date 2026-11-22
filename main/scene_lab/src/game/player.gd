@@ -45,6 +45,8 @@ var run_hold := 0.0
 var coyote_left := 0.0
 var _was_in_window := false
 var projectiles = null
+var _platform_grace := 0.0
+var _last_platform := 0.0
 
 # 弹反拦截规划的运行状态
 var _intercept_on := false
@@ -195,6 +197,18 @@ func step(dt: float, arena: Dictionary, enemies: Array = []) -> void:
 
 	# ---------------- 推进（记录刀的扫掠）
 	_last_swing_before = rig.weapon_xf
+	var ph := _platform_height(arena)
+	if ph > 0.01:
+		_last_platform = ph
+		_platform_grace = 0.16
+		rig.ground_y = ph
+	elif _platform_grace > 0.0 and rig.jump_state == "GROUND":
+		# 刚走出箱沿：给 0.16s 缓冲，避免“一只脚还在箱上”就被判掉下去
+		_platform_grace = maxf(0.0, _platform_grace - dt)
+		rig.ground_y = _last_platform
+	else:
+		_platform_grace = 0.0
+		rig.ground_y = 0.0
 	rig.advance(dt)
 	# 攻击中允许按 move.attack_drag 慢慢位移（rig 在攻击时会锁住位移）
 	if rig.is_attacking and dir.length() > 0.15:
@@ -303,9 +317,39 @@ func _on_footstep(pos: Vector3, strength: float) -> void:
 	Snd.play_at("step", pos, {"gain": 0.30 + 0.25 * clampf(strength, 0.0, 1.5)})
 
 
+func _platform_height(arena: Dictionary) -> float:
+	var best := 0.0
+	# 四足机甲不是质点：中心离台面边缘 0.6 u 以内仍算有支撑（约 0.33 m）
+	const SUPPORT_MARGIN := 0.6
+	for p in arena.get("platforms", []):
+		var c: Vector3 = p["c"]
+		var hx: float = float(p["hx"])
+		var hz: float = float(p["hz"])
+		var top: float = float(p["h"])
+		# strict：窄面（栏杆顶这种）用机体中心判定，不加支撑余量
+		var mx: float = hx if bool(p.get("strict", false)) else hx + SUPPORT_MARGIN
+		var mz: float = hz if bool(p.get("strict", false)) else hz + SUPPORT_MARGIN
+		if absf(rig.position.x - c.x) <= mx and absf(rig.position.z - c.z) <= mz:
+			if rig.position.y >= top - 0.10 and top >= best:
+				best = top
+	return best
+
+
 func _clamp_to_arena(arena: Dictionary) -> void:
 	if arena.is_empty():
 		return
+	# 圆形场地：按半径夹紧（AABB 的四个角会跑到圆外）
+	var rc: float = float(arena.get("bounds_circle", 0.0))
+	if rc > 0.01:
+		var flat := Vector2(rig.position.x, rig.position.z)
+		if flat.length() > rc:
+			flat = flat.normalized() * rc
+			rig.position.x = flat.x
+			rig.position.z = flat.y
+	# 头顶不能穿出天花板（引擎没有天花板碰撞，这里按机体高度夹一下）
+	var ceil_h: float = float(arena.get("ceiling", 0.0))
+	if ceil_h > 0.1:
+		rig.position.y = minf(rig.position.y, ceil_h - 4.60)
 	var b: AABB = arena.get("bounds", AABB())
 	if b.size.length() > 0.1:
 		var p: Vector3 = rig.position
@@ -457,6 +501,7 @@ func reset(pos: Transform3D) -> void:
 	block_push = Vector3.ZERO
 	last_cause = ""
 	_end_intercept()
+	rig.ground_y = 0.0
 	rig.reset_demo(pos.origin, pos.basis.get_euler().y)
 	rig.facing_override = true
 	rig.heading = pos.basis.get_euler().y

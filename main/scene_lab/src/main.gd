@@ -92,9 +92,27 @@ func _ready() -> void:
 	add_child(replay)
 	replay.setup(player, level, proj)
 
-	level.start_level(0)
+	if "--ward" in OS.get_cmdline_user_args():
+		P.set_value("cam.mode", "third")
+		P.set_value("cam.distance", 8.5)
+		P.set_value("cam.height", 1.8)
+		level.start_level(5)
+		cam.set_first_person(false)
+	elif "--panopticon" in OS.get_cmdline_user_args():
+		P.set_value("cam.mode", "third")
+		P.set_value("cam.distance", 20.0)
+		level.start_level(4)
+		cam.set_first_person(false)
+	elif "--warehouse" in OS.get_cmdline_user_args():
+		P.set_value("cam.mode", "third")
+		P.set_value("cam.distance", 20.0)
+		level.start_level(3)
+		cam.set_first_person(false)
+	else:
+		level.start_level(0)
 	Snd.set_arena(level.arena)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
 
 
 func _menus_open() -> bool:

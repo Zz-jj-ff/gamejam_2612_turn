@@ -23,6 +23,9 @@ const LEVELS := [
 	{"kind": "alley", "enemies": ["mob"]},
 	{"kind": "plaza", "enemies": ["mob", "mob", "mob", "archer"]},
 	{"kind": "chamber", "enemies": ["boss"]},
+	{"kind": "warehouse", "enemies": []},
+	{"kind": "panopticon", "enemies": []},
+	{"kind": "ward", "enemies": []},
 ]
 
 var index := 0

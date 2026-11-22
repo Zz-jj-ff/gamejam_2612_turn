@@ -299,6 +299,8 @@ static func resolve_circles(pos: Vector3, radius: float, cover: Array, y := 0.0)
 	for c in cover:
 		var cc: Vector3 = c["c"]
 		var h: float = float(c.get("h", 3.0))
+		if y < cc.y - 0.25:
+			continue          # 还在掩体底面以下（如二层环廊的护栏，不挡一层）
 		if y > cc.y + h + 0.2:
 			continue          # 已经在掩体顶上（跳过去了）
 		var phys: float = maxf(0.35, float(c["r"]) - 1.2)

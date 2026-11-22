@@ -146,6 +146,21 @@ func step(dt: float, arena: Dictionary) -> void:
 	var want_pos := focus - fwd * dist + Vector3(0, P.getf("cam.height"), 0)
 	if P.getb("cam.collision"):
 		want_pos = _avoid(want_pos, focus, arena)
+	# 镜头不能钻到地面以下（仰角很大时会出现）
+	want_pos.y = maxf(want_pos.y, 1.2)
+	# 也不能穿到天花板上面去（矮房间里会变成整屏黑）
+	var ceil_h: float = float(arena.get("ceiling", 0.0))
+	if ceil_h > 0.1:
+		want_pos.y = minf(want_pos.y, ceil_h - 0.7)
+	# 圆形场地：相机不能跑到圈外，否则只能看到墙背面的黑
+	var rad: float = float(arena.get("bounds_circle", 0.0))
+	if rad > 0.1:
+		var flat := Vector2(want_pos.x, want_pos.z)
+		var lim := rad - 0.8
+		if flat.length() > lim:
+			flat = flat.normalized() * lim
+			want_pos.x = flat.x
+			want_pos.z = flat.y
 	if not _initialized:
 		_pos_smooth = want_pos
 		_focus_smooth = focus
@@ -180,11 +195,14 @@ func _avoid(want: Vector3, focus: Vector3, arena: Dictionary) -> Vector3:
 	var f2 := Vector2(focus.x, focus.z)
 	var w2 := Vector2(want.x, want.z)
 	var max_u := 1.0
-	for w in walls:
-		var t := _seg_hit(f2, w2, w["a"], w["b"])
-		if t >= 0.0 and t < max_u:
-			max_u = t
+	if not arena.get("camera_open", false):
+		for w in walls:
+			var t := _seg_hit(f2, w2, w["a"], w["b"])
+			if t >= 0.0 and t < max_u:
+				max_u = t
 	for c in cover:
+		if not bool(c.get("cam", true)):
+			continue          # 悬空掩体（二层护栏）不挡相机
 		var cc: Vector3 = c["c"]
 		var t2 := _circle_hit(f2, w2, Vector2(cc.x, cc.z), float(c["r"]))
 		if t2 >= 0.0 and t2 < max_u:
