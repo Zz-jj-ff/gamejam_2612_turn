@@ -31,7 +31,7 @@ const BALL_R := 0.155
 const ROD_R := 0.095
 const JOINT_SPACING := 0.60
 const JOINT_OFFSET := 0.42
-const MAX_LINKS := 40
+const MAX_LINKS := 60
 const SEG_PERIOD := 0.62       # mechanical segment length (m)
 const RING_STEP := 0.16
 
@@ -84,6 +84,9 @@ var explode_cut := 0.0
 var explode_t := 0.0
 var explode_dur := 0.9
 var explode_burst_t := 0.0
+var cut_ember: MeshInstance3D
+var explode_pose := PackedVector3Array()
+var explode_seed := 0.0
 var boss_ref: Node = null
 var dyn_pts := PackedVector3Array()
 var dyn_vel := PackedVector3Array()
@@ -221,6 +224,19 @@ func setup(index: int, dir_body: Vector3, seed_value: float) -> void:
 	tip_ring.material_override = ring_mat
 	tip_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	root.add_child(tip_ring)
+	# white-hot break point while the limb burns back
+	cut_ember = MeshInstance3D.new()
+	cut_ember.mesh = MK.sphere(0.5, 10, 14, true)
+	var em := StandardMaterial3D.new()
+	em.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	em.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	em.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	em.albedo_color = Color(1.0, 0.72, 0.30, 0.95)
+	em.disable_receive_shadows = true
+	cut_ember.material_override = em
+	cut_ember.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	cut_ember.visible = false
+	root.add_child(cut_ember)
 
 	# planted-foot contact: a hot ring + a soft contact shadow on the floor
 	foot_mi = MeshInstance3D.new()
@@ -311,8 +327,15 @@ func set_explode() -> void:
 	explode_t = 0.0
 	explode_burst_t = 0.0
 	explode_total = maxf(actual_len, spine_length())
+	explode_pose.resize(N)
+	for i in N:
+		explode_pose[i] = pts[i] - base
+	explode_seed = float(idx) * 1.913 + 0.7
+	if ring_mat != null:
+		ring_mat.emission = BM_HOT_D
+		ring_mat.emission_energy_multiplier = 4.8
 	explode_cut = explode_total
-	explode_dur = clampf(explode_total * 0.065, 0.65, 1.35)
+	explode_dur = clampf(explode_total * 0.120, 1.05, 2.80)
 	dyn_ready = false
 
 
@@ -440,11 +463,12 @@ func update(dt: float, ctx: Dictionary) -> void:
 		explode_t += dt
 		var e := clampf(explode_t / explode_dur, 0.0, 1.0)
 		explode_cut = explode_total * (1.0 - e)
-		explode_burst_t += dt
-		if explode_burst_t >= 0.055 and boss_ref != null:
-			explode_burst_t = 0.0
+		_thrash_explode()
+		if boss_ref != null:
+			# the particle emitters sit on the receding break point and leave a
+			# world-space trail of independent fire/smoke puffs behind them
 			var cp := _point_at_len(explode_cut)
-			boss_ref.call("cut_burst", cp, 0.55 + 0.45 * randf())
+			boss_ref.call("emit_cut_fx", idx, cp, true, 1.0 - e)
 		if e >= 1.0:
 			alive = false
 			role = "dead"
@@ -452,6 +476,8 @@ func update(dt: float, ctx: Dictionary) -> void:
 			mi.visible = false
 			tip_ring.visible = false
 			root.visible = false
+			if boss_ref != null:
+				boss_ref.call("emit_cut_fx", idx, base, false, 0.0)
 		return
 
 	# ------------------------------------------------------------- role tick
@@ -539,7 +565,7 @@ func update(dt: float, ctx: Dictionary) -> void:
 		L = L_target
 	else:
 		L = move_toward(L, L_target, lrate * dt)
-	L = clampf(L, 3.0, 24.0)
+	L = clampf(L, 3.0, 30.0)
 
 	# shape params lag
 	var sh := 1.0 - exp(-5.5 * dt)
@@ -603,6 +629,32 @@ func update(dt: float, ctx: Dictionary) -> void:
 			attack_glow = maxf(attack_glow, 0.75)
 		elif attack_kind == 3 and t > 0.75 and t < 2.15:
 			attack_glow = maxf(attack_glow, 0.45)
+
+
+func _thrash_explode() -> void:
+	# The dying limb whips its remaining length around the socket while the
+	# break burns back through it: a violent, decaying mechanical flail.
+	var tt := explode_t
+	var ramp := smoothstep(0.0, 0.10, tt)
+	var yaw := 0.52 * sin(tt * 8.2 + explode_seed) * ramp
+	var lat := base_dir_w.cross(Vector3.UP)
+	if lat.length_squared() < 1e-4:
+		lat = Vector3.RIGHT
+	lat = lat.normalized()
+	var up2 := lat.cross(base_dir_w).normalized()
+	for i in range(1, N):
+		var f := float(i) / float(N - 1)
+		var amp := (1.55 + 1.15 * absf(sin(tt * 2.7 + f * 4.0 + explode_seed))) * pow(f, 1.40)
+		var off := lat * sin(tt * 10.5 + f * 7.0 + explode_seed) * amp
+		off += up2 * sin(tt * 13.3 + f * 5.0 + explode_seed * 1.7) * amp * 0.55
+		var p: Vector3 = base + explode_pose[i] + off
+		var rel := p - base
+		p = base + rel.rotated(Vector3.UP, yaw * f * f)
+		p.y = maxf(p.y, 0.12)
+		pts[i] = p
+	pts[0] = base
+	pts = _project(pts)
+	_snap_socket()
 
 
 func _snap_socket() -> void:
@@ -1345,6 +1397,10 @@ func build_mesh() -> void:
 			tip_t = (tip_p - back).normalized()
 		mi.visible = false
 		tip_ring.visible = false
+		cut_ember.visible = true
+		cut_ember.position = tip_p
+		var pulse := 0.10 + 0.035 * sin(explode_t * 47.0) + 0.02 * sin(explode_t * 91.0)
+		cut_ember.scale = Vector3.ONE * pulse
 	var tip_base: Vector3 = tip_p - tip_t * 0.06
 	tip_base.y = maxf(tip_base.y, ROD_R + 0.045)
 	_put_rod(nr, prev_p, tip_base)
@@ -1355,6 +1411,7 @@ func build_mesh() -> void:
 	# claw tip + its lit collar
 	var ax := SK.basis_y(tip_t)
 	if not exploding:
+		cut_ember.visible = false
 		mi.transform = Transform3D(ax * Basis.from_scale(Vector3(0.085, 0.26, 0.085)), tip_p - tip_t * 0.13)
 		tip_ring.transform = Transform3D(ax * Basis.from_scale(Vector3(0.105, 0.105, 0.105)), tip_p - tip_t * 0.26)
 

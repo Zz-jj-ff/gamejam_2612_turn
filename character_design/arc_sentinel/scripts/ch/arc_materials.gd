@@ -11,6 +11,8 @@ const LENS := preload("res://shaders/arc_lens.gdshader")
 const SHIELD := preload("res://shaders/arc_shield.gdshader")
 const TRAIL := preload("res://shaders/arc_trail.gdshader")
 const BLADE_CORE := preload("res://shaders/arc_blade_core.gdshader")
+const EYE_BALL := preload("res://shaders/arc_eye_ball.gdshader")
+const OPTIC_GLASS := preload("res://shaders/arc_optic_glass.gdshader")
 
 static var _metal_probed := false
 static var _metal_shader: Shader = null
@@ -78,23 +80,51 @@ static func hull() -> Material:
 
 
 static func hull_soft() -> Material:
-	return _metal_mat("hull_soft", Color(0.020, 0.020, 0.024), 1.0, 0.44,
-		Color(0.18, 0.19, 0.21), 0.20, 0.10, 0.18, 0.02, 0.02)
+	return _metal_mat("hull_soft", Color(0.018, 0.018, 0.022), 1.0, 0.48,
+		Color(0.10, 0.11, 0.12), 0.16, 0.10, 0.18, 0.02, 0.02)
 
 
 static func steel() -> Material:
-	return _metal_mat("steel", Color(0.060, 0.060, 0.066), 1.0, 0.34,
-		Color(0.28, 0.29, 0.31), 0.24, 0.20, 0.14, 0.012, 0.012)
+	return _metal_mat("steel", Color(0.060, 0.060, 0.067), 1.0, 0.36,
+		Color(0.26, 0.27, 0.30), 0.35, 0.20, 0.14, 0.012, 0.012)
 
 
 static func steel_dark() -> Material:
-	return _metal_mat("steel_dark", Color(0.062, 0.062, 0.070), 1.0, 0.34,
-		Color(0.38, 0.39, 0.42), 0.5, 0.42, 0.36, 0.04, 0.03)
+	return _metal_mat("steel_dark", Color(0.055, 0.055, 0.062), 1.0, 0.36,
+		Color(0.30, 0.31, 0.34), 0.45, 0.42, 0.36, 0.04, 0.03)
 
 
 static func tread() -> Material:
-	return _metal_mat("tread", Color(0.021, 0.020, 0.019), 0.95, 0.42,
-		Color(0.29, 0.28, 0.27), 0.55, 0.25, 0.55, 0.04, 0.06)
+	# belt shoes: black anodised steel.  A *broad* specular wash on these large
+	# flat up-facing pads reads as light concrete, so the roughness is kept low
+	# (sharp glints instead of a wash).
+	return _metal_mat("tread", Color(0.040, 0.040, 0.044), 1.0, 0.30,
+		Color(0.34, 0.35, 0.38), 0.55, 0.45, 0.45, 0.03, 0.03)
+
+
+static func belt() -> StandardMaterial3D:
+	if _c.has("belt"):
+		return _c["belt"]
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.012, 0.012, 0.014)
+	m.metallic = 0.20
+	m.metallic_specular = 0.10
+	m.roughness = 0.90
+	m.resource_name = "belt"
+	return _keep("belt", m)
+
+
+static func mat_black() -> StandardMaterial3D:
+	# large flat up-facing deck plates: coated black, no grazing metal wash
+	if _c.has("mat_black"):
+		return _c["mat_black"]
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.010, 0.010, 0.011)
+	m.metallic = 0.10
+	m.metallic_specular = 0.0
+	m.roughness = 0.88
+	m.resource_name = "mat_black"
+	return _keep("mat_black", m)
 
 
 static func orange_panel() -> Material:
@@ -171,6 +201,35 @@ static func lens() -> ShaderMaterial:
 	m.set_shader_parameter("aperture", 0.55)
 	m.resource_name = "lens"
 	return _keep("lens", m)
+
+
+## Rotating red optic ball (latitude bands + seams so its rotation is legible).
+static func eye_ball() -> ShaderMaterial:
+	if _c.has("eye_ball"):
+		return _c["eye_ball"]
+	var m := ShaderMaterial.new()
+	m.shader = EYE_BALL
+	m.set_shader_parameter("base_color", Color(0.045, 0.006, 0.008))
+	m.set_shader_parameter("glow_color", Color(1.0, 0.10, 0.03))
+	m.set_shader_parameter("intensity", 0.55)
+	m.set_shader_parameter("band_count", 7.0)
+	m.set_shader_parameter("seed", 0.3)
+	m.resource_name = "eye_ball"
+	return _keep("eye_ball", m)
+
+
+## Thin fixed glass shell over the socket aperture.
+static func optic_glass() -> ShaderMaterial:
+	if _c.has("optic_glass"):
+		return _c["optic_glass"]
+	var m := ShaderMaterial.new()
+	m.shader = OPTIC_GLASS
+	m.set_shader_parameter("tint", Color(1.0, 0.22, 0.05))
+	m.set_shader_parameter("alpha", 0.14)
+	m.set_shader_parameter("intensity", 0.28)
+	m.set_shader_parameter("scan", 0.6)
+	m.resource_name = "optic_glass"
+	return _keep("optic_glass", m)
 
 
 static func shield() -> ShaderMaterial:

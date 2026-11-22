@@ -654,12 +654,16 @@ func _test_support_floor() -> void:
 	var h_stand: float = boss.body_center.y
 	# cut down below three limbs
 	var guard := 0
-	while boss.live > 2 and guard < 10:
+	while boss.live > 2 and guard < 12:
+		var cut_one := false
 		for i in 8:
-			if boss.live > 2 and boss.tents[i].alive:
-				boss.cut_tentacle(i)
-				break
+			if boss.live > 2 and boss.tents[i].alive and boss.tents[i].role != "explode":
+				cut_one = boss.cut_tentacle(i)
+				if cut_one:
+					break
 		guard += 1
+		if not cut_one:
+			_step(30)
 	_step(240)
 	var attacks := 0
 	var alive := 0
@@ -698,7 +702,7 @@ func _test_cut_explosion() -> void:
 	var mono := true
 	var prev := cut0
 	var samples := 0
-	for s in 90:
+	for s in 160:
 		_step(1)
 		if tn.role == "explode" or tn.alive:
 			if tn.explode_cut > prev + 0.001:
@@ -707,8 +711,18 @@ func _test_cut_explosion() -> void:
 			samples += 1
 	_ck("cut: explosion starts at the tip", ok and cut0 > total - 1.4,
 		"cut %.1f of %.1f m" % [cut0, total])
+	_step(240)
+	var active_fx := 0
+	for b in boss._bursts:
+		if b["active"]:
+			active_fx += 1
+	for e in boss._cut_fx:
+		if e["sparks"].emitting or e["frags"].emitting:
+			active_fx += 1
 	_ck("cut: burns from tip to root", mono and tn.explode_cut < 0.25,
 		"cut %.2f m, %d samples" % [tn.explode_cut, samples])
+	_ck("cut: no residue after the burst", active_fx == 0,
+		"%d active burst(s)" % active_fx)
 	_ck("cut: limb disappears", not tn.alive and not tn.root.visible,
 		"alive=%s visible=%s" % [str(tn.alive), str(tn.root.visible)])
 	metrics["cut"] = {"total_len": total, "first_cut": cut0, "final_cut": tn.explode_cut}

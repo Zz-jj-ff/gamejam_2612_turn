@@ -4,7 +4,7 @@ render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabl
 // ARC SENTINEL — swept arc trail. Vertex colour carries tint and age.
 // UV.y = 0 at the blade root, 1 at the tip; UV.x = age (1 newest).
 
-uniform float energy = 2.0;
+uniform float energy = 0.9;
 uniform vec4 tint : source_color = vec4(1.0, 0.78, 0.18, 1.0);
 uniform float streak_scale = 9.0;
 

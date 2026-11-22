@@ -51,6 +51,15 @@ func _ready() -> void:
 		for i in 8:
 			b.force_role(i, "idle")
 		b.cut_tentacle(0)
+	elif roles == "fallen":
+		for i in 8:
+			b.force_role(i, "idle")
+		for i in 6:
+			for j in 8:
+				if b.cut_tentacle(j):
+					break
+			for j in 22:
+				b.sim_step(1.0 / 60.0)
 	var tg := OS.get_environment("PROBE_TARGET")
 	if tg != "":
 		var p := tg.split(",")
@@ -120,6 +129,8 @@ func _ready() -> void:
 			studio.set_view(14, 2, 10.5, Vector3(0, 4.4, 1.8))
 		"socket2":
 			studio.set_view(58, 6, 9.0, Vector3(0, 4.4, 1.4))
+		"fx":
+			studio.set_view(30, 4, 16.0, Vector3(5.5, 3.2, 5.5))
 		_:
 			studio.set_view(30, 11, 32, Vector3(0, 5.0, 2.0))
 	await _frames(4)
