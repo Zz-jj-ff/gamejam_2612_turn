@@ -73,6 +73,12 @@ func _render_clip(clip: String) -> void:
 			ch._manual = false
 			ch._fade_t = 0.0
 			ch._apply_now(t)
+			# locomotion is deterministic per still: run advances the belts at
+			# run_speed, every other clip holds them still
+			var travel := 0.0
+			if clip == "run":
+				travel = ch.get_param("run_speed") * t
+			ch.set_track_travel(travel, travel)
 			ch._update_fx(0.016)
 			await _frames(1)
 			var path: String = out_dir.path_join(clip).path_join("%s_%02d.png" % [view, i])

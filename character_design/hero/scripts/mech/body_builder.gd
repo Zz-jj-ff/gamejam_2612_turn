@@ -12,7 +12,10 @@ const P := {
 	"hip_y": 1.235, "hip_r": 0.30, "femur": 0.60, "tibia": 0.66,
 	"foot_r": 0.50, "ankle_h": 0.08, "waist_y": 0.12,
 	"torso_scale": 0.82, "upper_scale": 1.35, "lower_scale": 0.78,
-	"upper": 0.62, "fore": 0.58, "grip": 0.16,
+	"upper": 0.496, "fore": 0.464, "grip": 0.16,
+	# Arm cross-section shrink (relative to the old 0.62/0.58 build).  Keeps the
+	# forearm a touch thinner than the shin, as asked.
+	"arm_w": 0.86,
 	"shoulder": Vector3(0.32, 0.38, -0.02),
 	"blade_y0": 0.28, "blade_len": 1.25,
 	"leg_az": [45.0, 135.0, 225.0, 315.0],
@@ -484,40 +487,51 @@ static func _build_arm(rig: Node3D, side: float) -> void:
 	rig.pauldrons.append(pauldron)
 
 	var upper: float = float(P["upper"])
+	var fore: float = float(P["fore"])
+	# Cross-sections are all scaled by P.arm_w, so the arms stay layered but end
+	# up a touch thinner than the legs (forearm ~0.078 m vs the 0.082 m shin).
+	var w: float = float(P["arm_w"])
+	# Every detail offset is written as a FRACTION of its bone (the brackets keep
+	# the old absolute metres on the 0.62 / 0.58 arm), so resizing a bone slides
+	# the armour layering along with the joint and never changes the relative
+	# layout of the plates, bands and joints.
 	# 上臂参照大腿beam_x 分层构造：粗骨架 + 外覆装甲板 + 侧甲 + 导光缝，保持明确的多段关节感
-	MK.add(shoulder, MK.beam_x(upper, 0.100, 0.094, 0.078, 0.072, 0.34), MAT.frame(), Vector3.ZERO, Vector3(0, 0, -90))
-	MK.add(shoulder, MK.beam_x(upper * 0.74, 0.084, 0.140, 0.070, 0.110, 0.32), MAT.armor_white(), Vector3(0.0, -0.028, 0), Vector3(0, 0, -90))
-	MK.add(shoulder, MK.beam_x(upper * 0.30, 0.022, 0.160, 0.019, 0.135, 0.26), MAT.armor_blue(), Vector3(0.0, -0.052, 0), Vector3(0, 0, -90))
-	MK.add(shoulder, MK.beam_x(upper * 0.22, 0.010, 0.024, 0.009, 0.020), MAT.emissive(Color(0.25, 0.55, 1.0), 2.2), Vector3(0.058, -0.16, 0.0), Vector3(0, 0, -90))
+	MK.add(shoulder, MK.beam_x(upper, 0.100 * w, 0.094 * w, 0.078 * w, 0.072 * w, 0.34), MAT.frame(), Vector3.ZERO, Vector3(0, 0, -90))
+	MK.add(shoulder, MK.beam_x(upper * 0.74, 0.084 * w, 0.140 * w, 0.070 * w, 0.110 * w, 0.32), MAT.armor_white(), Vector3(0.0, -0.045 * upper, 0), Vector3(0, 0, -90))
+	MK.add(shoulder, MK.beam_x(upper * 0.30, 0.022 * w, 0.160 * w, 0.019 * w, 0.135 * w, 0.26), MAT.armor_blue(), Vector3(0.0, -0.084 * upper, 0), Vector3(0, 0, -90))
+	MK.add(shoulder, MK.beam_x(upper * 0.22, 0.010 * w, 0.024 * w, 0.009 * w, 0.020 * w), MAT.emissive(Color(0.25, 0.55, 1.0), 2.2), Vector3(0.058 * w, -0.258 * upper, 0.0), Vector3(0, 0, -90))
 	for zs in [-1.0, 1.0]:
-		MK.add(shoulder, MK.beam_x(upper * 0.52, 0.095, 0.022, 0.070, 0.016, 0.30), MAT.armor_white(),
-			Vector3(0.0, -0.10, 0.072 * zs), Vector3(0, 0, -90))
-		MK.add(shoulder, MK.beam_x(upper * 0.34, 0.020, 0.011, 0.015, 0.009), MAT.emissive(Color(0.22, 0.55, 1.0), 2.0),
-			Vector3(0.0, -0.24, 0.084 * zs), Vector3(0, 0, -90))
-	MK.add(shoulder, MK.beam_x(upper * 0.70, 0.028, 0.085, 0.022, 0.060, 0.30), MAT.armor_blue(), Vector3(0.0, -0.14, 0.0), Vector3(0, 0, -90))
-	MK.add(shoulder, MK.beam_x(upper * 0.52, 0.012, 0.022, 0.009, 0.017), MAT.emissive(Color(0.20, 0.50, 1.0), 0.8), Vector3(0.0, -0.26, 0.058), Vector3(0, 0, -90))
+		MK.add(shoulder, MK.beam_x(upper * 0.52, 0.095 * w, 0.022 * w, 0.070 * w, 0.016 * w, 0.30), MAT.armor_white(),
+			Vector3(0.0, -0.161 * upper, 0.072 * w * zs), Vector3(0, 0, -90))
+		MK.add(shoulder, MK.beam_x(upper * 0.34, 0.020 * w, 0.011 * w, 0.015 * w, 0.009 * w), MAT.emissive(Color(0.22, 0.55, 1.0), 2.0),
+			Vector3(0.0, -0.387 * upper, 0.084 * w * zs), Vector3(0, 0, -90))
+	MK.add(shoulder, MK.beam_x(upper * 0.70, 0.028 * w, 0.085 * w, 0.022 * w, 0.060 * w, 0.30), MAT.armor_blue(), Vector3(0.0, -0.226 * upper, 0.0), Vector3(0, 0, -90))
+	MK.add(shoulder, MK.beam_x(upper * 0.52, 0.012 * w, 0.022 * w, 0.009 * w, 0.017 * w), MAT.emissive(Color(0.20, 0.50, 1.0), 0.8), Vector3(0.0, -0.419 * upper, 0.058 * w), Vector3(0, 0, -90))
 
 	var elbow := Node3D.new()
 	elbow.name = "Elbow"
 	elbow.position = Vector3(0, -upper, 0)
 	shoulder.add_child(elbow)
-	MK.add(elbow, MK.prism(10, 0.068, 0.068, 0.115, 0), MAT.frame(), Vector3.ZERO, Vector3(0, 0, 90))
-	MK.add(elbow, MK.prism(6, 0.085, 0.070, 0.048, 0), MAT.armor_blue(), Vector3(0.0, 0.008, -0.060), Vector3(90, 0, 0))
-	MK.add(elbow, MK.prism(10, 0.038, 0.038, 0.008, 0), MAT.emissive(Color(0.25, 0.55, 1.0), 2.0), Vector3(0, 0, 0.062), Vector3(90, 0, 0))
-	MK.add(elbow, MK.prism(6, 0.062, 0.048, 0.030, 0), MAT.armor_white(), Vector3(0.0, 0.008, -0.080), Vector3(90, 0, 0))
+	MK.add(elbow, MK.prism(10, 0.068 * w, 0.068 * w, 0.115 * w, 0), MAT.frame(), Vector3.ZERO, Vector3(0, 0, 90))
+	MK.add(elbow, MK.prism(6, 0.085 * w, 0.070 * w, 0.048 * w, 0), MAT.armor_blue(), Vector3(0.0, 0.013 * upper, -0.060 * w), Vector3(90, 0, 0))
+	MK.add(elbow, MK.prism(10, 0.038 * w, 0.038 * w, 0.008 * w, 0), MAT.emissive(Color(0.25, 0.55, 1.0), 2.0), Vector3(0, 0, 0.062 * w), Vector3(90, 0, 0))
+	MK.add(elbow, MK.prism(6, 0.062 * w, 0.048 * w, 0.030 * w, 0), MAT.armor_white(), Vector3(0.0, 0.013 * upper, -0.080 * w), Vector3(90, 0, 0))
 	for zs in [-1.0, 1.0]:
-		MK.add(elbow, MK.prism(6, 0.045, 0.040, 0.024, 0), MAT.trim(), Vector3(0, 0, 0.055 * zs), Vector3(90, 0, 0))
+		MK.add(elbow, MK.prism(6, 0.045 * w, 0.040 * w, 0.024 * w, 0), MAT.trim(), Vector3(0, 0, 0.055 * w * zs), Vector3(90, 0, 0))
 
-	var fore: float = float(P["fore"])
-	MK.add(elbow, MK.beam_x(fore, 0.082, 0.078, 0.055, 0.058, 0.32), MAT.frame(), Vector3.ZERO, Vector3(0, 0, -90))
-	MK.add(elbow, MK.beam_x(fore * 0.88, 0.066, 0.118, 0.046, 0.082, 0.30), MAT.armor_white(), Vector3(0.0, -0.025, 0), Vector3(0, 0, -90))
-	MK.add(elbow, MK.beam_x(fore * 0.42, 0.024, 0.092, 0.018, 0.064, 0.26), MAT.armor_blue(), Vector3(0.0, -0.070, 0), Vector3(0, 0, -90))
+	var plate_len: float = fore * 0.88
+	var plate_off: float = 0.043 * fore          # old 0.025 m
+	var plate_w0: float = 0.118 * w
+	var plate_w1: float = 0.082 * w
+	MK.add(elbow, MK.beam_x(fore, 0.082 * w, 0.078 * w, 0.055 * w, 0.058 * w, 0.32), MAT.frame(), Vector3.ZERO, Vector3(0, 0, -90))
+	MK.add(elbow, MK.beam_x(plate_len, 0.066 * w, plate_w0, 0.046 * w, plate_w1, 0.30), MAT.armor_white(), Vector3(0.0, -plate_off, 0), Vector3(0, 0, -90))
+	MK.add(elbow, MK.beam_x(fore * 0.42, 0.024 * w, 0.092 * w, 0.018 * w, 0.064 * w, 0.26), MAT.armor_blue(), Vector3(0.0, -0.121 * fore, 0), Vector3(0, 0, -90))
 	for zs in [-1.0, 1.0]:
-		MK.add(elbow, MK.beam_x(fore * 0.50, 0.068, 0.016, 0.050, 0.012, 0.28), MAT.armor_white(),
-			Vector3(0.0, -0.08, 0.050 * zs), Vector3(0, 0, -90))
-	MK.add(elbow, MK.beam_x(fore * 0.44, 0.028, 0.085, 0.020, 0.060, 0.26), MAT.armor_blue(), Vector3(0.0, -0.16, 0.0), Vector3(0, 0, -90))
-	MK.add(elbow, MK.beam_x(fore * 0.54, 0.011, 0.022, 0.008, 0.016), MAT.emissive(Color(0.20, 0.50, 1.0), 0.8), Vector3(0.0, -0.20, 0.052), Vector3(0, 0, -90))
-	MK.bolt(elbow, Vector3(0.04, -0.05, 0.035), 0.010, 0.010, MAT.trim())
+		MK.add(elbow, MK.beam_x(fore * 0.50, 0.068 * w, 0.016 * w, 0.050 * w, 0.012 * w, 0.28), MAT.armor_white(),
+			Vector3(0.0, -0.138 * fore, 0.050 * w * zs), Vector3(0, 0, -90))
+	MK.add(elbow, MK.beam_x(fore * 0.44, 0.028 * w, 0.085 * w, 0.020 * w, 0.060 * w, 0.26), MAT.armor_blue(), Vector3(0.0, -0.276 * fore, 0.0), Vector3(0, 0, -90))
+	MK.add(elbow, MK.beam_x(fore * 0.54, 0.011 * w, 0.022 * w, 0.008 * w, 0.016 * w), MAT.emissive(Color(0.20, 0.50, 1.0), 0.8), Vector3(0.0, -0.345 * fore, 0.052 * w), Vector3(0, 0, -90))
+	MK.bolt(elbow, Vector3(0.04 * w, -0.086 * fore, 0.035 * w), 0.010 * w, 0.010 * w, MAT.trim())
 
 	var wrist := Node3D.new()
 	wrist.name = "Wrist"
@@ -532,13 +546,24 @@ static func _build_arm(rig: Node3D, side: float) -> void:
 	MK.add(wrist, MK.prism(8, 0.016, 0.013, 0.010, 0), MAT.emissive(Color(0.30, 0.65, 1.0), 2.2), Vector3(0.0, -0.056, 0.032), Vector3(90, 0, 0))
 	MK.add(wrist, MK.prism(8, 0.030, 0.027, 0.018, PI / 8.0), MAT.trim(), Vector3(0.0, 0.026, 0.0))
 
-	# left forearm indicator strip: 3 blue status lamps + 1 green ready lamp
+	# 左前臂状态灯：3 蓝 + 1 绿。每盏灯都有两层：先是一枚嵌在白色前臂装甲
+	# 外表面上的黑色压圈，再是从压圈里长出来的半球灯珠。旧版把灯做成 4 个
+	# 圆盘悬在手臂外侧 ~3 cm 处、圆盘轴线还顺着手臂方向，所以动作一变就明显
+	# 觉得灯没长在胳膊上；现在灯珠基面就贴在外层装甲的解析表面上，随手臂
+	# 一起转，任何姿势都只是“灯亮在装甲面上”。
 	if side < 0:
 		for i in 4:
 			var col := Color(0.22, 0.55, 1.0) if i < 3 else Color(0.20, 1.0, 0.45)
-			# 指示灯必须贴在手臂外表面，不能埋进加粗后的装甲里
-			var ind := MK.add(elbow, MK.prism(10, 0.013, 0.013, 0.010, 0),
-				MAT.emissive(col, 2.6), Vector3(-0.072, -0.055 - i * 0.050, 0.0))
+			# old spacing: first lamp 55 mm below the elbow, then every 50 mm
+			var d: float = (0.052 + 0.086 * float(i)) * fore
+			var half_w: float = _beam_half_w(d, plate_len, plate_w0, plate_w1)
+			var y: float = -(plate_off + d)
+			# the emitter keeps its absolute size (it is a lamp, not an arm
+			# part) while its position follows the shrunken armour surface
+			MK.add(elbow, MK.prism(12, 0.0150, 0.0150, 0.0045, 0), MAT.trim(),
+				Vector3(0, y, -(half_w - 0.0008)), Vector3(90, 0, 0))
+			var ind := MK.add(elbow, MK.dome(0.0105, 4, 12), MAT.emissive(col, 1.8),
+				Vector3(0, y, -(half_w + 0.0002)), Vector3(-90, 0, 0))
 			ind.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			rig.left_indicator_meshes.append(ind)
 
@@ -637,6 +662,21 @@ static func _build_weapon(rig: Node3D) -> void:
 
 
 # ------------------------------------------------------------------ helpers
+
+## Z half-width of a MK.beam_x cross-section, `d` metres along the beam.
+## Mirrors the ring layout inside MK.beam_x so a surface detail (the forearm
+## indicator lamps) can be planted exactly on the outer armour skin instead of
+## guessing an offset that ends up floating next to the arm.
+static func _beam_half_w(d: float, length: float, w0: float, w1: float) -> float:
+	var xs := [0.0, minf(0.055, length * 0.06), maxf(length - 0.055, length * 0.94), length]
+	var ws := [w0 * 0.82, w0, w1, w1 * 0.82]
+	var t := clampf(d, 0.0, length)
+	for i in 3:
+		if t <= xs[i + 1]:
+			var u := clampf((t - xs[i]) / maxf(xs[i + 1] - xs[i], 1e-5), 0.0, 1.0)
+			return lerpf(ws[i], ws[i + 1], u) * 0.5
+	return ws[3] * 0.5
+
 
 ## Two-bone arm IK onto the sword grips, identical maths to the rig solver.
 static func _pose_arms_to_grip(rig: Node3D) -> void:

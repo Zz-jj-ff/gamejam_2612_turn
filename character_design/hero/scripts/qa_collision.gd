@@ -145,9 +145,13 @@ func _parts() -> Array:
 		var sh: Vector3 = arm["shoulder"].global_position
 		var el: Vector3 = arm["elbow"].global_position
 		var wr: Vector3 = arm["wrist"].global_position
-		out.append(_cap("arm%s_up" % side, "arm" + side, sh, el, 0.075 * upper_s))
-		out.append(_cap("arm%s_fore" % side, "arm" + side, el, wr, 0.060 * upper_s))
-		out.append(_cap("arm%s_hand" % side, "hand" + side, wr, wr + (wr - el).normalized() * 0.07, 0.050 * upper_s))
+		# Real mesh half-extents, not a fudge: the upper arm's widest point is
+		# the 0.160*arm_w blue band, the forearm's is the 0.118*arm_w white
+		# plate, and the fist is a 0.040 prism.  All in build space, scaled by
+		# the torso (upper_s).
+		out.append(_cap("arm%s_up" % side, "arm" + side, sh, el, 0.069 * upper_s))
+		out.append(_cap("arm%s_fore" % side, "arm" + side, el, wr, 0.051 * upper_s))
+		out.append(_cap("arm%s_hand" % side, "hand" + side, wr, wr + (wr - el).normalized() * 0.07, 0.040 * upper_s))
 	for i in rig.legs.size():
 		var leg: Dictionary = rig.legs[i]
 		var hip: Vector3 = leg["hip"].global_position

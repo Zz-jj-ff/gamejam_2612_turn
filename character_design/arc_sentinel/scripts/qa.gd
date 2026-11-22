@@ -7,6 +7,7 @@ extends Node3D
 ## track belt periodicity, and joint-speed sanity.
 
 const D2R := PI / 180.0
+const TAU := PI * 2.0
 const CH_SCENE := "res://scenes/character.tscn"
 
 var ch: Node3D
@@ -420,31 +421,58 @@ func _test_optic() -> void:
 
 
 func _test_tracks() -> void:
-	print("\n-- tracks --")
-	var loop: float = kin.track_loop_len()
-	var dur: float = anim.duration("run")
-	var p0: Dictionary = anim.sample("run", 0.0)
-	var p1: Dictionary = anim.sample("run", dur)
-	var dtravel := absf(float(p1["track_L"]) - float(p0["track_L"]))
-	print("  belt loop %.3f m  travel/cycle %.3f m  wheel/cycle %.1f rad" % [
-		loop, dtravel, float(p1["wheel_L"]) - float(p0["wheel_L"])])
-	if absf(dtravel - loop) > 0.002:
-		_fail("run travel per cycle %.3f does not match belt loop %.3f" % [dtravel, loop])
-	var spins := absf(float(p1["wheel_L"]) - float(p0["wheel_L"])) / TAU
-	if absf(spins - round(spins)) > 0.01:
-		_fail("run wheel spin %.3f rev is not periodic" % spins)
-	# plates really move (computed from the pose; a headless render server does
-	# not keep MultiMesh buffers)
-	var a: Transform3D = ch.rig.belt_plate_xf("trackL", 0, float(p0["track_L"]))
-	var p25: Dictionary = anim.sample("run", dur * 0.25)
-	var b: Transform3D = ch.rig.belt_plate_xf("trackL", 0, float(p25["track_L"]))
-	print("  plate 0 moved %.4f m over a quarter cycle (travel %.3f m)" % [
-		a.origin.distance_to(b.origin), float(p25["track_L"])])
-	if a.origin.distance_to(b.origin) < 0.05:
-		_fail("belt plates do not move during run")
+	print("\n-- tracks (independent locomotion layer) --")
+	ch.clear_track_control()
+	var rs: float = ch.get_param("run_speed")
+	var cap: float = ch.rig.MAX_TRACK_SPEED
+	var wr: float = ch.rig.wheel_r
+	var revs := rs / (TAU * wr)
+	print("  run speed %.2f m/s  cap %.1f m/s  wheel r %.3f m  wheel %.2f rev/s" % [
+		rs, cap, wr, revs])
+	if rs <= 0.05 or rs > cap + 1e-6:
+		_fail("run speed %.2f m/s outside (0, %.1f]" % [rs, cap])
+	if cap > 3.0001:
+		_fail("track speed cap %.2f m/s exceeds the 3 m/s budget" % cap)
+	if revs > 3.5:
+		_fail("wheel spin %.2f rev/s at run speed is implausible" % revs)
+	# the body clips must not carry any track state at all
+	for nm in ["idle", "run"]:
+		var p: Dictionary = anim.sample(nm, anim.duration(nm) * 0.37)
+		for k in ["track_L", "track_R", "wheel_L", "wheel_R"]:
+			if p.has(k):
+				_fail("%s clip still carries track key %s" % [nm, k])
+	# straight drive: belt distance and wheel rollout must agree exactly
+	ch.set_track_speed(rs, rs)
+	var wn0: float = (ch.rig.J["wheel_trackL0"] as Node3D).rotation.x
+	var t0: Dictionary = ch.track_state()
+	ch.step_tracks(0.5)
+	var wn1: float = (ch.rig.J["wheel_trackL0"] as Node3D).rotation.x
+	var t1: Dictionary = ch.track_state()
+	var dl := float(t1["left_travel"]) - float(t0["left_travel"])
+	var dr := float(t1["right_travel"]) - float(t0["right_travel"])
+	var wl := float(t1["left_wheel"]) - float(t0["left_wheel"])
+	var wrr := float(t1["right_wheel"]) - float(t0["right_wheel"])
+	print("  straight 0.5 s: belt L %+.3f R %+.3f m  wheel L %+.3f R %+.3f rad" % [
+		dl, dr, wl, wrr])
+	print("  wheel node spin %.3f rad -> rim travel %.3f m" % [wn1 - wn0, (wn1 - wn0) * wr])
+	if absf(dl - rs * 0.5) > 1e-4 or absf(dr - rs * 0.5) > 1e-4:
+		_fail("belt travel %.3f/%.3f does not match speed x time %.3f" % [
+			dl, dr, rs * 0.5])
+	if absf(wl * wr - dl) > 1e-4 or absf(wrr * wr - dr) > 1e-4:
+		_fail("wheel rollout does not match belt travel (belt %.3f, wheel %.3f)" % [
+			dl, wl * wr])
+	if absf((wn1 - wn0) * wr - dl) > 1e-4:
+		_fail("wheel nodes did not follow the belt (%.3f vs %.3f m)" % [
+			(wn1 - wn0) * wr, dl])
+	# plates really move, at the same rate (computed from the belt layer;
+	# a headless render server does not keep MultiMesh buffers)
+	var a: Transform3D = ch.rig.belt_plate_xf("trackL", 0, -float(t0["left_travel"]))
+	var b: Transform3D = ch.rig.belt_plate_xf("trackL", 0, -float(t1["left_travel"]))
+	var plate_d := a.origin.distance_to(b.origin)
+	print("  plate 0 moved %.3f m in 0.5 s (belt travel %.3f m)" % [plate_d, dl])
+	if plate_d < absf(dl) * 0.9:
+		_fail("belt plates do not track the belt distance (%.3f vs %.3f)" % [plate_d, dl])
 	# belt direction: the ground contact patch must run backwards (toward -Z)
-	var c: Transform3D = ch.rig.belt_plate_xf("trackL", 0, 0.0)
-	var d2: Transform3D = ch.rig.belt_plate_xf("trackL", 0, -0.02)
 	var near_bottom := false
 	for i in 8:
 		var q: Transform3D = ch.rig.belt_plate_xf("trackL", i, 0.0)
@@ -452,10 +480,84 @@ func _test_tracks() -> void:
 			near_bottom = true
 			var q2: Transform3D = ch.rig.belt_plate_xf("trackL", i, -0.02)
 			if q2.origin.z > q.origin.z:
-				_fail("belt contact patch runs forward under a negative travel")
+				_fail("belt contact patch runs forward under a forward drive")
 			break
 	if not near_bottom:
 		_fail("no belt plate reaches the ground contact patch")
+	# differential: opposite tracks counter-rotate the wheels (pivot in place)
+	ch.set_track_speed(-1.0, 1.0)
+	var d0: Dictionary = ch.track_state()
+	ch.step_tracks(0.25)
+	var d1: Dictionary = ch.track_state()
+	var piv_l := float(d1["left_travel"]) - float(d0["left_travel"])
+	var piv_r := float(d1["right_travel"]) - float(d0["right_travel"])
+	var piv_wl := float(d1["left_wheel"]) - float(d0["left_wheel"])
+	var piv_wr := float(d1["right_wheel"]) - float(d0["right_wheel"])
+	print("  differential 0.25 s: L %+.3f R %+.3f m  wheel L %+.2f R %+.2f rad" % [
+		piv_l, piv_r, piv_wl, piv_wr])
+	if absf(piv_l + 0.25) > 1e-4 or absf(piv_r - 0.25) > 1e-4:
+		_fail("differential tracks do not run opposite (%.3f / %.3f)" % [piv_l, piv_r])
+	if piv_wl * piv_wr >= 0.0:
+		_fail("differential wheels do not counter-rotate")
+	# clamp to the 3 m/s budget
+	ch.set_track_speed(9.0, -9.0)
+	var c0: Dictionary = ch.track_state()
+	print("  clamp: requested 9.0 / -9.0 -> %.2f / %.2f m/s" % [
+		float(c0["left_speed"]), float(c0["right_speed"])])
+	if absf(float(c0["left_speed"]) - cap) > 1e-6 \
+			or absf(float(c0["right_speed"]) + cap) > 1e-6:
+		_fail("track speeds are not clamped to the cap")
+	# body animation and locomotion are independent in both directions
+	ch.set_track_speed(0.8, -0.8)
+	var f0: Dictionary = ch.track_state()
+	ch.set_playing(false)
+	ch.play_anim("attack1")
+	ch.set_anim_time(0.3)
+	ch.step_tracks(0.1)
+	var f1: Dictionary = ch.track_state()
+	print("  attack1 @0.3 s keeps driving: L %+.2f R %+.2f m/s, %+.3f / %+.3f m" % [
+		float(f1["left_speed"]), float(f1["right_speed"]),
+		float(f1["left_travel"]) - float(f0["left_travel"]),
+		float(f1["right_travel"]) - float(f0["right_travel"])])
+	if absf(float(f1["left_speed"]) - 0.8) > 1e-6 \
+			or absf(float(f1["right_speed"]) + 0.8) > 1e-6:
+		_fail("body clip changed the track speeds")
+	if absf(float(f1["left_travel"]) - float(f0["left_travel"]) - 0.08) > 1e-4 \
+			or absf(float(f1["right_travel"]) - float(f0["right_travel"]) + 0.08) > 1e-4:
+		_fail("body clip reset the track travel")
+	# an external speed command must keep integrating through the real frame loop
+	var g0: Dictionary = ch.track_state()
+	ch._process(0.1)
+	var g1: Dictionary = ch.track_state()
+	var cmd_adv := float(g1["left_travel"]) - float(g0["left_travel"])
+	if absf(cmd_adv - 0.08) > 1e-4:
+		_fail("external track speed command did not advance (%.3f m in 0.1 s)" % cmd_adv)
+	if absf(float(g1["left_speed"]) - 0.8) > 1e-6 \
+			or absf(float(g1["right_speed"]) + 0.8) > 1e-6:
+		_fail("external track speed command was overwritten by the clip")
+	# run autopilot: with no manual override, run drives both tracks at run_speed;
+# calling the real _process once also proves the per-frame wiring
+	ch.set_playing(false)
+	ch.play_anim("run")
+	ch.clear_track_control()
+	ch.set_anim_speed(1.0)
+	var q0: Dictionary = ch.track_state()
+	ch._process(0.25)
+	var e0: Dictionary = ch.track_state()
+	var run_adv := float(e0["left_travel"]) - float(q0["left_travel"])
+	print("  run autopilot: L %+.2f R %+.2f m/s, +%.3f m in one 0.25 s tick" % [
+		float(e0["left_speed"]), float(e0["right_speed"]), run_adv])
+	if absf(float(e0["left_speed"]) - rs) > 1e-4 \
+			or absf(float(e0["right_speed"]) - rs) > 1e-4:
+		_fail("run clip does not drive the tracks at run_speed")
+	if absf(run_adv - rs * 0.25) > 1e-4:
+		_fail("per-frame drive advanced %.3f m, expected %.3f" % [run_adv, rs * 0.25])
+	ch.clear_track_control()
+	ch.set_playing(false)
+	ch.play_anim("idle")
+	rows.append({"tracks": {"run_speed": rs, "cap": cap, "wheel_r": wr,
+		"wheel_rev_s": revs, "straight_dl": dl, "straight_dr": dr,
+		"pivot_l": piv_l, "pivot_r": piv_r}})
 
 
 func _test_static_clearance() -> void:

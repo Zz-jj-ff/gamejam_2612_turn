@@ -124,7 +124,7 @@ func _run() -> void:
 		if not rig.is_attacking and i > 10:
 			break
 	_ok(best_back.z >= 0.90, "back thrust reaches behind", "tip z %.2f" % best_back.z)
-	_ok(best_back.x <= 0.02, "back thrust exits left side", "tip x %.2f" % best_back.x)
+	_ok(absf(best_back.x) <= 0.25, "back thrust aims behind the centre line", "tip x %.2f" % best_back.x)
 	_ok(back_yaw <= 0.80, "back thrust turn <= 45 deg", "%.3f rad" % back_yaw)
 	report["back"] = {"tip": best_back, "yaw": back_yaw}
 

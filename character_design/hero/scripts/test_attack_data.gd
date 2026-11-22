@@ -431,10 +431,11 @@ func _check_back_thrust() -> void:
 			u, v3s(w["hilt"]), v3s(w["axis"]), v3s(w["tip"])])
 		if u >= 0.999:
 			var h := hilt_of(sp)
-			check(absf(h.x + 0.1223) < 2.0e-3, "BACK hit hilt x %.4f" % h.x)
+			check(absf(h.x + 0.1011) < 2.0e-3, "BACK hit hilt x %.4f" % h.x)
 			check(absf(h.y - 0.2200) < 2.0e-3, "BACK hit hilt y %.4f" % h.y)
-			check(absf(h.z + 0.3726) < 2.0e-3, "BACK hit hilt z %.4f" % h.z)
-			var target := Vector3(-0.389418, 0.0, 0.921061).normalized()
+			check(absf(h.z + 0.3654) < 2.0e-3, "BACK hit hilt z %.4f" % h.z)
+			# the reverse thrust now converges on the centre line behind the body
+			var target := Vector3(-0.257081, 0.0, 0.966390).normalized()
 			check((b.y as Vector3).dot(target) > 0.9999,
 				"BACK hit axis %.6f" % (b.y as Vector3).dot(target))
 			check((w["tip"] as Vector3).z >= 0.90,

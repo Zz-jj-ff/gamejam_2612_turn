@@ -7,6 +7,9 @@ class_name ArcRig3
 ## inner ball) and a single 3-ball-joint arm rising from its top deck, ending in
 ## an arc-blade emitter.  Everything is generated from code; geometry is merged
 ## per (node, material) to keep draw calls low.
+##
+## Track belts / wheels are a separate locomotion layer: body clips never touch
+## them, and each side integrates its own ground speed (differential steering).
 
 const MK := preload("res://scripts/kit/mesh_kit.gd")
 const SK := preload("res://scripts/kit/shape_kit.gd")
@@ -14,10 +17,19 @@ const AM := preload("res://scripts/ch/arc_materials.gd")
 const KIN := preload("res://scripts/ch/arc_kin.gd")
 const D2R := PI / 180.0
 const TAU := PI * 2.0
+## Hard ground-speed cap for one track (m/s). The 1.56 m chassis only needs
+## 3 m/s; anything above reads as an RC toy.
+const MAX_TRACK_SPEED := 3.0
 
 var J: Dictionary = {}
 var P: Dictionary = {}
 var kin: ArcKin3
+
+## Locomotion is its own layer, independent of the body/arm clips. Each side
+## integrates its own signed ground speed; the belt phase and the wheel angle
+## are both derived from that distance, so they can never disagree.
+var track_vel := Vector2.ZERO      # (left, right) m/s, +Z forward
+var track_dist := Vector2.ZERO     # (left, right) metres travelled forward
 
 var marker_tip: Node3D
 var marker_base: Node3D
@@ -68,6 +80,7 @@ func build(p: Dictionary) -> void:
 	_build_blade_fx()
 	_build_lights()
 	apply_pose({})
+	_apply_tracks()
 
 
 func _dims() -> void:
@@ -355,6 +368,24 @@ func _build_chassis() -> void:
 	# undercarriage skid
 	_p(parts, MK.plate(0.300, 0.500, 0.030, 0.010), hull, Vector3(0, 0.400, 0),
 		Vector3(90, 0, 0))
+	# front driving headlights + grille slats
+	var head_glow := AM.emissive(Color(1.0, 0.46, 0.12), 3.4)
+	var tail_glow := AM.emissive(Color(1.0, 0.16, 0.03), 3.6)
+	for sx in [1, -1]:
+		var lx := float(sx) * 0.175
+		_p(parts, MK.plate(0.118, 0.038, 0.018, 0.004), steel_d,
+			Vector3(lx, 0.470, 0.308))
+		_p(parts, MK.plate(0.092, 0.018, 0.008, 0.002), head_glow,
+			Vector3(lx, 0.470, 0.316))
+		_p(parts, MK.plate(0.118, 0.036, 0.018, 0.004), steel_d,
+			Vector3(lx, 0.470, -0.308))
+		_p(parts, MK.plate(0.092, 0.016, 0.008, 0.002), tail_glow,
+			Vector3(lx, 0.470, -0.316))
+	for i in 3:
+		_p(parts, MK.plate(0.165, 0.010, 0.012, 0.002), steel,
+			Vector3(0.0, 0.456 + float(i) * 0.014, 0.310))
+		_p(parts, MK.plate(0.016, 0.052, 0.016, 0.003), steel,
+			Vector3((float(i) - 1.0) * 0.052, 0.470, -0.310))
 	_bake(root, parts)
 
 
@@ -451,13 +482,18 @@ func _build_track(side: int) -> void:
 	path["mm_acc"] = mm2
 	path["acc_step"] = acc_step
 	path["acc_count"] = acc_count
-	# --- open triangular frame: edge beams + hub + spokes + tensioner
+	# --- open triangular frame: edge beams + aligned edge lights + hub + spokes + tensioner + bogie rollers
 	var frame: Array = []
 	var poly: Array = kin.track_poly
+	var out_x := float(side)
+	var track_glow := AM.emissive(AM.ORANGE, 3.4)
+	var marker_glow := AM.emissive(Color(1.0, 0.42, 0.06), 3.6)
+	var wheel_glow := AM.emissive(AM.ORANGE, 2.8)
 	var centroid := Vector2.ZERO
 	for p in poly:
 		centroid += p
 	centroid /= float(poly.size())
+	var ctr := Vector3(0.0, centroid.y, centroid.x)
 	var inset: Array = []
 	for p in poly:
 		inset.append(centroid + (p - centroid) * 0.86)
@@ -466,59 +502,133 @@ func _build_track(side: int) -> void:
 		var b: Vector2 = inset[(i + 1) % 3]
 		_p(frame, SK.beam(Vector3(0, a.y, a.x), Vector3(0, b.y, b.x),
 			0.064, 0.056, 0.050, 0.046, 0.30, Vector3.RIGHT, 0.006), steel_d)
-		# gusset plate at each edge midpoint
-		var mid := (a + b) * 0.5
-		_p(frame, MK.plate(0.120, 0.090, 0.030, 0.006), hull2,
-			Vector3(0.0, mid.y, mid.x), Vector3(0, 0, 0))
-		_p(frame, MK.plate(0.040, 0.014, 0.010, 0.002), emis,
-			Vector3(0.0, mid.y, mid.x), Vector3(0, 0, 0))
-	# central hub
-	_p(frame, MK.disc(0.112, 0.104, 26, 0.010), steel_d, Vector3.ZERO,
-		Vector3.RIGHT)
-	_ring(frame, 0.074, 0.100, 0.014, 26, Vector3(0.055, 0, 0), Vector3.RIGHT,
-		steel, 0.002)
-	_ring(frame, 0.050, 0.066, 0.010, 24, Vector3(0.058, 0, 0), Vector3.RIGHT,
-		orange, 0.001)
-	_p(frame, MK.disc(0.036, 0.020, 18, 0.003), emis, Vector3(0.062, 0, 0),
-		Vector3.RIGHT)
+		# edge-aligned armored clamp housing + glowing orange side strips
+		var p0 := a.lerp(b, 0.27)
+		var p1 := a.lerp(b, 0.73)
+		_p(frame, SK.beam(Vector3(0, p0.y, p0.x), Vector3(0, p1.y, p1.x),
+			0.068, 0.064, 0.068, 0.064, 0.26, Vector3.RIGHT, 0.004), hull2)
+		var l0 := a.lerp(b, 0.32)
+		var l1 := a.lerp(b, 0.68)
+		for sx in [1, -1]:
+			var x_off := float(sx) * 0.035
+			_p(frame, SK.beam(Vector3(x_off, l0.y, l0.x), Vector3(x_off, l1.y, l1.x),
+				0.015, 0.010, 0.015, 0.010, 0.20, Vector3.RIGHT, 0.002), track_glow)
+	# bottom beam side clearance marker LEDs (placed below the bottom edge light bar)
+	for mz in [-0.25, 0.0, 0.25]:
+		_p(frame, MK.plate(0.056, 0.020, 0.014, 0.003), steel_d,
+			Vector3(out_x * 0.030, 0.206, mz), Vector3(0, 90, 0))
+		_p(frame, MK.plate(0.038, 0.010, 0.008, 0.002), marker_glow,
+			Vector3(out_x * 0.036, 0.206, mz), Vector3(0, 90, 0))
+	# central hub (coaxial along X at triangle centroid, symmetric on both faces)
+	_disc(frame, 0.104, 0.114, 28, ctr, Vector3.RIGHT, steel_d, 0.010)
+	for sx in [1, -1]:
+		var hs := float(sx)
+		_ring(frame, 0.072, 0.098, 0.014, 28, ctr + Vector3(hs * 0.058, 0, 0),
+			Vector3.RIGHT, steel, 0.002)
+		_ring(frame, 0.052, 0.068, 0.010, 26, ctr + Vector3(hs * 0.062, 0, 0),
+			Vector3.RIGHT, orange, 0.002)
+		_disc(frame, 0.050, 0.012, 24, ctr + Vector3(hs * 0.062, 0, 0),
+			Vector3.RIGHT, hull, 0.002)
+		_disc(frame, 0.032, 0.012, 20, ctr + Vector3(hs * 0.068, 0, 0),
+			Vector3.RIGHT, emis, 0.002)
+		for b_idx in 6:
+			var ba := TAU * float(b_idx) / 6.0 + 0.25
+			_p(frame, MK.prism(6, 0.008, 0.007, 0.012, 0.0), steel,
+				ctr + Vector3(hs * 0.066, cos(ba) * 0.085, sin(ba) * 0.085),
+				Vector3(0, 0, -90.0 * hs))
 	for i in 3:
 		var c: Vector2 = poly[i]
-		_p(frame, SK.beam(Vector3(0, centroid.y, centroid.x),
-			Vector3(0, c.y, c.x), 0.058, 0.048, 0.040, 0.036, 0.30,
-			Vector3.RIGHT, 0.005), steel)
-		_p(frame, MK.disc(0.056, 0.140, 20, 0.006), steel_d,
-			Vector3(0, c.y, c.x), Vector3.RIGHT)
-	# rear tensioner + hydraulic
+		_p(frame, SK.beam(ctr, Vector3(0, c.y, c.x),
+			0.054, 0.042, 0.038, 0.032, 0.30, Vector3.RIGHT, 0.005), steel)
+		_disc(frame, 0.044, 0.140, 20, Vector3(0, c.y, c.x), Vector3.RIGHT, steel_d, 0.005)
+	# rear hydraulic tensioner (collinear cylinder + piston, clear of rear wheel)
 	var rear: Vector2 = poly[2]
-	_p(frame, SK.beam(Vector3(0.050, rear.y + 0.02, rear.x),
-		Vector3(0.050, rear.y + 0.16, rear.x + 0.06), 0.030, 0.030, 0.024, 0.024,
-		0.3, Vector3.RIGHT, 0.003), steel)
-	_p(frame, MK.prism(14, 0.038, 0.034, 0.070, 0.0), steel_d,
-		Vector3(0.050, rear.y + 0.10, rear.x + 0.03), Vector3(0, 0, 0))
+	var tp0 := Vector3(out_x * 0.022, centroid.y - 0.020, -0.095)
+	var tp1 := Vector3(out_x * 0.022, rear.y + 0.060, rear.x + 0.165)
+	var tmid := tp0.lerp(tp1, 0.56)
+	_p(frame, SK.beam(tp0, tmid, 0.036, 0.036, 0.034, 0.034, 0.32, Vector3.RIGHT, 0.003), steel_d)
+	_p(frame, SK.beam(tp0.lerp(tp1, 0.52), tp0.lerp(tp1, 0.60),
+		0.042, 0.042, 0.042, 0.042, 0.32, Vector3.RIGHT, 0.002), orange)
+	_p(frame, SK.beam(tmid, tp1, 0.018, 0.018, 0.018, 0.018, 0.32, Vector3.RIGHT, 0.002), steel)
+	_p(frame, MK.sphere(0.020, 12, 8, true), steel_d, tp1)
+	# two bottom bogie / road rollers + suspension forks
+	var rollers: Array = []
+	for r_idx in 2:
+		var rz := -0.17 if r_idx == 0 else 0.17
+		_p(frame, SK.beam(Vector3(-0.070, 0.216, rz), Vector3(0.070, 0.216, rz),
+			0.024, 0.022, 0.024, 0.022, 0.30, Vector3.UP, 0.002), steel_d)
+		for sx in [1, -1]:
+			var fx := float(sx) * 0.068
+			_p(frame, SK.beam(Vector3(fx, 0.216, rz), Vector3(fx, 0.132, rz),
+				0.022, 0.014, 0.020, 0.014, 0.30, Vector3.RIGHT, 0.002), steel_d)
+			_disc(frame, 0.018, 0.012, 16, Vector3(float(sx) * 0.075, 0.132, rz),
+				Vector3.RIGHT, steel, 0.002)
+			_disc(frame, 0.009, 0.008, 12, Vector3(float(sx) * 0.081, 0.132, rz),
+				Vector3.RIGHT, emis, 0.001)
+		var rn := Node3D.new()
+		rn.name = "roller_%s%d" % [nm, r_idx]
+		rn.position = Vector3(0.0, 0.132, rz)
+		node.add_child(rn)
+		var rp: Array = []
+		_ring(rp, 0.044, 0.060, 0.116, 28, Vector3.ZERO, Vector3.RIGHT, steel_d, 0.005)
+		_disc(rp, 0.046, 0.040, 24, Vector3.ZERO, Vector3.RIGHT, joint, 0.003)
+		for sx in [1, -1]:
+			var rx := float(sx) * 0.032
+			for spk in 4:
+				var ra := TAU * float(spk) / 4.0
+				_p(rp, SK.beam(Vector3(rx, 0, 0),
+					Vector3(rx, cos(ra) * 0.046, sin(ra) * 0.046),
+					0.012, 0.014, 0.010, 0.012, 0.30, Vector3.RIGHT, 0.002), steel)
+		_bake(rn, rp)
+		rollers.append(rn)
+	path["rollers"] = rollers
 	_bake(node, frame)
-	# --- corner wheels
+	# subtle warm interior track light
+	var t_light := OmniLight3D.new()
+	t_light.light_color = Color(1.0, 0.28, 0.05)
+	t_light.light_energy = 0.50
+	t_light.omni_range = 0.95
+	t_light.shadow_enabled = false
+	t_light.position = ctr + Vector3(out_x * 0.04, 0.0, 0.0)
+	node.add_child(t_light)
+	# --- corner wheels (hollow machined drums + recessed spokes + rim LED rings)
 	for i in 3:
 		var wn: Node3D = J["wheel_%s%d" % [nm, i]]
 		var c2: Vector2 = poly[i]
 		wn.position = Vector3(0, c2.y, c2.x)
 		var wp: Array = []
-		_p(wp, MK.disc(wheel_r, 0.170, 44, 0.010), steel_d)
+		_ring(wp, wheel_r - 0.024, wheel_r, 0.170, 44, Vector3.ZERO, Vector3.RIGHT, steel_d, 0.008)
+		_disc(wp, wheel_r - 0.020, 0.056, 36, Vector3.ZERO, Vector3.RIGHT, joint, 0.004)
+		_disc(wp, 0.054, 0.172, 28, Vector3.ZERO, Vector3.RIGHT, hull, 0.005)
 		for sx in [1, -1]:
-			var x := float(sx) * 0.092
-			_ring(wp, 0.098, 0.126, 0.012, 32, Vector3(x, 0, 0), Vector3.RIGHT, steel, 0.002)
-			_ring(wp, 0.062, 0.078, 0.010, 28, Vector3(x, 0, 0), Vector3.RIGHT, orange, 0.002)
-			_disc(wp, 0.052, 0.018, 24, Vector3(x, 0, 0), Vector3.RIGHT, hull, 0.003)
-			_disc(wp, 0.020, 0.022, 16, Vector3(float(sx) * 0.102, 0, 0), Vector3.RIGHT, emis, 0.002)
+			var sxf := float(sx)
+			var x := sxf * 0.088
+			_ring(wp, 0.112, 0.136, 0.012, 36, Vector3(sxf * 0.086, 0, 0),
+				Vector3.RIGHT, steel, 0.002)
+			_ring(wp, 0.100, 0.110, 0.008, 36, Vector3(sxf * 0.083, 0, 0),
+				Vector3.RIGHT, wheel_glow, 0.001)
+			_ring(wp, 0.056, 0.072, 0.010, 28, Vector3(x, 0, 0),
+				Vector3.RIGHT, orange, 0.002)
+			_disc(wp, 0.052, 0.018, 24, Vector3(sxf * 0.089, 0, 0),
+				Vector3.RIGHT, hull2, 0.003)
+			_ring(wp, 0.022, 0.032, 0.010, 20, Vector3(sxf * 0.097, 0, 0),
+				Vector3.RIGHT, steel_d, 0.001)
+			_disc(wp, 0.020, 0.010, 18, Vector3(sxf * 0.100, 0, 0),
+				Vector3.RIGHT, emis, 0.002)
 			for b in 6:
 				var a2 := TAU * float(b) / 6.0 + 0.3
-				_p(wp, MK.prism(6, 0.010, 0.008, 0.014, 0.0), steel,
-					Vector3(float(sx) * 0.096, cos(a2) * 0.066, sin(a2) * 0.066),
-					Vector3(0, 0, 90))
-		for b2 in 5:
-			var a3 := TAU * float(b2) / 5.0 + 0.2
-			_p(wp, SK.beam(Vector3(0, 0, 0),
-				Vector3(0, cos(a3) * wheel_r * 0.84, sin(a3) * wheel_r * 0.84),
-				0.060, 0.020, 0.034, 0.013, 0.30, Vector3.RIGHT, 0.003), steel)
+				_p(wp, MK.prism(6, 0.009, 0.007, 0.014, 0.0), steel,
+					Vector3(sxf * 0.096, cos(a2) * 0.040, sin(a2) * 0.040),
+					Vector3(0, 0, -90.0 * sxf))
+			for b2 in 5:
+				var a3 := TAU * float(b2) / 5.0 + 0.2
+				_p(wp, SK.beam(Vector3(sxf * 0.052, cos(a3) * 0.044, sin(a3) * 0.044),
+					Vector3(sxf * 0.052, cos(a3) * (wheel_r - 0.018), sin(a3) * (wheel_r - 0.018)),
+					0.034, 0.038, 0.022, 0.030, 0.30, Vector3.RIGHT, 0.003), steel)
+				if b2 == 0:
+					_p(wp, SK.beam(Vector3(sxf * 0.070, cos(a3) * 0.054, sin(a3) * 0.054),
+						Vector3(sxf * 0.070, cos(a3) * (wheel_r - 0.022), sin(a3) * (wheel_r - 0.022)),
+						0.014, 0.008, 0.010, 0.008, 0.25, Vector3.RIGHT, 0.002), orange)
 		_bake(wn, wp)
 
 
@@ -561,14 +671,19 @@ func _build_turret() -> void:
 		var a := TAU * float(i) / 8.0 + 0.2
 		_p(parts, MK.prism(6, 0.016, 0.013, 0.014, 0.0), steel,
 			Vector3(cos(a) * 0.272, -cube_half - 0.002, sin(a) * 0.272))
-	# vertical chamfer strips (orange seams) + corner bolts
+	# vertical chamfer strips (flush on the 45-deg chamfer face) + clamp collars
+	var d_ch := cube_half * 0.942
+	var d_ch_trim := d_ch + 0.004
 	for sx in [1, -1]:
 		for sz in [1, -1]:
-			var pos := Vector3(float(sx) * (cube_half - 0.034), 0.0, float(sz) * (cube_half - 0.034))
-			_p(parts, MK.plate(0.020, cube * 0.64, 0.010, 0.003), steel_d, pos,
-				Vector3(0, 45.0 * float(sx * sz), 0))
-			_p(parts, MK.plate(0.008, cube * 0.48, 0.006, 0.002), orange_d, pos,
-				Vector3(0, 45.0 * float(sx * sz), 0))
+			var pos := Vector3(float(sx) * d_ch, 0.0, float(sz) * d_ch)
+			var pos_t := Vector3(float(sx) * d_ch_trim, 0.0, float(sz) * d_ch_trim)
+			var rot_c := Vector3(0, 45.0 * float(sx * sz), 0)
+			_p(parts, MK.plate(0.030, cube * 0.68, 0.010, 0.003), steel_d, pos, rot_c)
+			_p(parts, MK.plate(0.010, cube * 0.52, 0.006, 0.002), orange_d, pos_t, rot_c)
+			for cy_s in [1.0, -1.0]:
+				_p(parts, MK.plate(0.038, 0.026, 0.014, 0.003), steel,
+					Vector3(float(sx) * d_ch, cy_s * cube * 0.28, float(sz) * d_ch), rot_c)
 	# --- front cheek strips beside the big optic
 	for sx in [1, -1]:
 		_p(parts, MK.plate(0.040, 0.360, 0.020, 0.006), steel_d,
@@ -584,21 +699,55 @@ func _build_turret() -> void:
 	]), hull2, Vector3(0, 0, cube_half - 0.062))
 	_p(parts, MK.plate(0.320, 0.012, 0.008, 0.002), emis,
 		Vector3(0, -cube_half - 0.002, cube_half - 0.008))
-	# side vents
+	# side armor panels + framed heatsink louver bay + light bars + service port
+	var vent_glow := AM.emissive(AM.ORANGE, 2.0)
 	for sx in [1, -1]:
-		for i in 4:
-			_p(parts, MK.plate(0.150, 0.014, 0.012, 0.003), joint,
-				Vector3(float(sx) * (cube_half + 0.002), 0.070 - float(i) * 0.038, -0.030),
+		var sxf := float(sx)
+		# upper & lower armor panels + mid-channel rails
+		_p(parts, MK.plate(cube * 0.68, cube * 0.17, 0.012, 0.004), hull2,
+			Vector3(sxf * (cube_half + 0.004), cube * 0.265, -0.010), Vector3(0, 90, 0))
+		_p(parts, MK.plate(cube * 0.68, cube * 0.17, 0.012, 0.004), hull2,
+			Vector3(sxf * (cube_half + 0.004), -cube * 0.265, -0.010), Vector3(0, 90, 0))
+		for ry in [0.092, -0.092]:
+			_p(parts, MK.plate(cube * 0.64, 0.014, 0.014, 0.003), steel_d,
+				Vector3(sxf * (cube_half + 0.007), ry, -0.010), Vector3(0, 90, 0))
+		# framed 5-slat heatsink louver bay with subtle internal warm vent glow
+		_p(parts, MK.plate(0.185, 0.165, 0.014, 0.004), steel_d,
+			Vector3(sxf * (cube_half + 0.006), 0.0, -0.020), Vector3(0, 90, 0))
+		_p(parts, MK.plate(0.158, 0.136, 0.008, 0.002), joint,
+			Vector3(sxf * (cube_half + 0.011), 0.0, -0.020), Vector3(0, 90, 0))
+		_p(parts, MK.plate(0.018, 0.118, 0.004, 0.001), vent_glow,
+			Vector3(sxf * (cube_half + 0.014), 0.0, -0.020), Vector3(0, 90, 0))
+		for i in 5:
+			_p(parts, MK.plate(0.150, 0.013, 0.012, 0.003), steel,
+				Vector3(sxf * (cube_half + 0.018), 0.052 - float(i) * 0.026, -0.020),
 				Vector3(0, 90, 0))
-		_p(parts, MK.plate(0.022, 0.250, 0.010, 0.003), orange_d,
-			Vector3(float(sx) * (cube_half + 0.004), -0.020, 0.140),
-			Vector3(0, 90, 0))
-		_p(parts, MK.plate(0.010, 0.170, 0.006, 0.002), emis,
-			Vector3(float(sx) * (cube_half + 0.010), -0.020, 0.140),
-			Vector3(0, 90, 0))
-		_p(parts, MK.plate(0.050, 0.330, 0.014, 0.004), steel_d,
-			Vector3(float(sx) * (cube_half + 0.002), -0.090, -0.120),
-			Vector3(0, 90, 0))
+		# front vertical side accent + light bar
+		_p(parts, MK.plate(0.036, 0.270, 0.014, 0.004), steel_d,
+			Vector3(sxf * (cube_half + 0.006), -0.010, 0.140), Vector3(0, 90, 0))
+		_p(parts, MK.plate(0.020, 0.240, 0.010, 0.003), orange_d,
+			Vector3(sxf * (cube_half + 0.010), -0.010, 0.140), Vector3(0, 90, 0))
+		_p(parts, MK.plate(0.010, 0.180, 0.008, 0.002), emis,
+			Vector3(sxf * (cube_half + 0.014), -0.010, 0.140), Vector3(0, 90, 0))
+		# rear vertical rib + circular machined service port
+		_p(parts, MK.plate(0.048, 0.340, 0.014, 0.004), steel_d,
+			Vector3(sxf * (cube_half + 0.006), -0.020, -0.145), Vector3(0, 90, 0))
+		_ring(parts, 0.020, 0.030, 0.010, 20,
+			Vector3(sxf * (cube_half + 0.014), -0.115, -0.145), Vector3.RIGHT, steel, 0.002)
+		_ring(parts, 0.013, 0.019, 0.008, 18,
+			Vector3(sxf * (cube_half + 0.016), -0.115, -0.145), Vector3.RIGHT, orange, 0.001)
+		_disc(parts, 0.013, 0.008, 16,
+			Vector3(sxf * (cube_half + 0.015), -0.115, -0.145), Vector3.RIGHT, joint, 0.001)
+		# upper side horizontal marker light
+		_p(parts, MK.plate(0.092, 0.024, 0.010, 0.003), steel_d,
+			Vector3(sxf * (cube_half + 0.009), cube * 0.265, 0.020), Vector3(0, 90, 0))
+		_p(parts, MK.plate(0.075, 0.012, 0.008, 0.002), emis,
+			Vector3(sxf * (cube_half + 0.013), cube * 0.265, 0.020), Vector3(0, 90, 0))
+		# 4 corner hex fasteners on upper/lower side panels
+		for fy in [cube * 0.265, -cube * 0.265]:
+			for fz in [-0.095, 0.095]:
+				_p(parts, MK.prism(6, 0.008, 0.006, 0.010, 0.0), steel,
+					Vector3(sxf * (cube_half + 0.010), fy, fz), Vector3(0, 0, -90.0 * sxf))
 	# --- top deck
 	_p(parts, MK.plate(0.400, 0.380, 0.018, 0.006), AM.mat_black(),
 		Vector3(0, cube_half + 0.030, -0.010), Vector3(90, 0, 0))
@@ -624,20 +773,72 @@ func _build_turret() -> void:
 		var a2 := TAU * float(i) / 4.0 + 0.785
 		_p(parts, MK.prism(6, 0.012, 0.010, 0.014, 0.0), steel,
 			Vector3(cos(a2) * 0.100, cube_half + 0.030, sin(a2) * 0.100))
-	# --- rear battery pack
+	# --- rear power pack: core frame + twin armor pods + radiator + exhausts + grab bar + charge bar
+	var rear_core_glow := AM.emissive(AM.ORANGE, 3.0)
+	var rear_amber := AM.emissive(Color(1.0, 0.55, 0.12), 4.0)
 	_p(parts, SK.loft([
-		{"y": -0.180, "w": 0.330, "d": 0.090, "c": 0.22},
-		{"y": 0.170, "w": 0.330, "d": 0.090, "c": 0.22},
-	]), hull2, Vector3(0, -0.020, -cube_half - 0.034))
-	_p(parts, MK.plate(0.240, 0.012, 0.008, 0.002), emis,
-		Vector3(0, -0.140, -cube_half - 0.082))
-	_p(parts, MK.plate(0.060, 0.018, 0.008, 0.002), emis,
-		Vector3(0.100, 0.120, -cube_half - 0.082))
+		{"y": -0.200, "w": cube * 0.74, "d": 0.046, "c": 0.18},
+		{"y": 0.185, "w": cube * 0.74, "d": 0.046, "c": 0.18},
+	]), steel_d, Vector3(0, -0.005, -cube_half - 0.020))
+	# twin vertical side battery/armor pods with clamp straps & bolts
 	for sx in [1, -1]:
-		_p(parts, MK.prism(10, 0.032, 0.028, 0.070, 0.0), steel_d,
-			Vector3(float(sx) * 0.100, 0.175, -cube_half - 0.040))
-		_p(parts, MK.disc(0.026, 0.010, 16, 0.002), joint,
-			Vector3(float(sx) * 0.100, 0.213, -cube_half - 0.040))
+		var sxf := float(sx)
+		_p(parts, SK.loft([
+			{"y": -0.180, "w": 0.118, "d": 0.068, "c": 0.22},
+			{"y": 0.165, "w": 0.118, "d": 0.068, "c": 0.22},
+		]), hull2, Vector3(sxf * 0.122, -0.005, -cube_half - 0.042))
+		_p(parts, MK.plate(0.024, 0.260, 0.012, 0.003), steel_d,
+			Vector3(sxf * 0.162, 0.0, -cube_half - 0.074))
+		_p(parts, MK.plate(0.012, 0.210, 0.008, 0.002), orange,
+			Vector3(sxf * 0.162, 0.0, -cube_half - 0.078))
+		for strap_y in [0.115, -0.085]:
+			_p(parts, MK.plate(0.092, 0.024, 0.010, 0.003), steel,
+				Vector3(sxf * 0.116, strap_y, -cube_half - 0.076))
+			for bx in [-0.026, 0.026]:
+				_p(parts, MK.prism(6, 0.007, 0.006, 0.010, 0.0), steel,
+					Vector3(sxf * 0.116 + bx, strap_y, -cube_half - 0.081), Vector3(-90, 0, 0))
+	# central recessed radiator core + horizontal cooling fins
+	_p(parts, MK.plate(0.116, 0.230, 0.010, 0.002), joint,
+		Vector3(0, 0.020, -cube_half - 0.046))
+	_p(parts, MK.plate(0.026, 0.180, 0.008, 0.002), rear_core_glow,
+		Vector3(0, 0.025, -cube_half - 0.050))
+	for i in 6:
+		_p(parts, MK.plate(0.118, 0.012, 0.024, 0.003), steel,
+			Vector3(0, 0.110 - float(i) * 0.034, -cube_half - 0.060))
+	# twin top exhaust manifolds + protective grab bar
+	for sx in [1, -1]:
+		var ex := float(sx) * 0.112
+		_p(parts, MK.prism(10, 0.036, 0.030, 0.074, 0.0), steel_d,
+			Vector3(ex, 0.175, -cube_half - 0.046))
+		_ring(parts, 0.026, 0.036, 0.010, 20, Vector3(ex, 0.195, -cube_half - 0.046),
+			Vector3.UP, orange, 0.002)
+		_ring(parts, 0.022, 0.031, 0.010, 20, Vector3(ex, 0.214, -cube_half - 0.046),
+			Vector3.UP, steel, 0.002)
+		_disc(parts, 0.022, 0.008, 16, Vector3(ex, 0.215, -cube_half - 0.046),
+			Vector3.UP, joint, 0.001)
+	_p(parts, SK.beam(Vector3(-0.145, 0.148, -cube_half - 0.088),
+		Vector3(0.145, 0.148, -cube_half - 0.088),
+		0.016, 0.016, 0.016, 0.016, 0.30, Vector3.UP, 0.002), steel)
+	for sx in [1, -1]:
+		var gx := float(sx) * 0.140
+		_p(parts, SK.beam(Vector3(gx, 0.148, -cube_half - 0.088),
+			Vector3(gx, 0.148, -cube_half - 0.062),
+			0.016, 0.016, 0.018, 0.018, 0.30, Vector3.UP, 0.002), steel)
+		_p(parts, MK.sphere(0.009, 10, 8, true), steel,
+			Vector3(gx, 0.148, -cube_half - 0.088))
+	# lower rear telemetry & charge-level strip + rear valence
+	_p(parts, MK.plate(0.280, 0.044, 0.014, 0.004), steel_d,
+		Vector3(0, -0.132, -cube_half - 0.074))
+	for i in 5:
+		var cx := (float(i) - 2.0) * 0.048
+		_p(parts, MK.plate(0.034, 0.014, 0.008, 0.002),
+			rear_amber if i == 4 else emis,
+			Vector3(cx, -0.132, -cube_half - 0.082))
+	_p(parts, MK.plate(0.360, 0.026, 0.020, 0.005), steel_d,
+		Vector3(0, -0.190, -cube_half - 0.056))
+	for sx in [1, -1]:
+		_p(parts, MK.plate(0.028, 0.012, 0.008, 0.002), emis,
+			Vector3(float(sx) * 0.155, -0.190, -cube_half - 0.066))
 	_bake(body, parts)
 
 
@@ -900,12 +1101,8 @@ func apply_pose(pose: Dictionary) -> void:
 	_apply_joint("sh", pose)
 	_apply_joint("elb", pose)
 	_apply_joint("wr", pose)
-	# tracks
-	for s in [1, -1]:
-		var nm := "trackL" if s > 0 else "trackR"
-		var travel := float(pose.get("track_L" if s > 0 else "track_R", 0.0))
-		var wheel = pose.get("wheel_L" if s > 0 else "wheel_R", null)
-		_update_belt(nm, travel, wheel if wheel is float else -1e9)
+	# Tracks are deliberately NOT part of the pose: they are driven by the
+	# locomotion layer below, so body clips and steering stay independent.
 	# blade FX on/off
 	var on := clampf((float(pose.get("_blade_on", 1.0)) - 0.45) / 0.55, 0.0, 1.0)
 	if blade_light:
@@ -930,7 +1127,7 @@ func _apply_joint(j: String, pose: Dictionary) -> void:
 			float(pose.get(j + "_roll", 0.0)))
 
 
-func _update_belt(nm: String, travel: float, wheel: float) -> void:
+func _update_belt(nm: String, travel: float) -> void:
 	var path: Dictionary = _belts.get(nm, {})
 	if path.is_empty():
 		return
@@ -945,11 +1142,68 @@ func _update_belt(nm: String, travel: float, wheel: float) -> void:
 		var step := int(path["acc_step"])
 		for j in mm2.instance_count:
 			mm2.set_instance_transform(j, belt_plate_xf(nm, j * step + 2, travel))
-	# wheels: explicit pose value if provided, else derived from belt travel
-	var wrot := wheel if wheel > -1e8 else -travel / wheel_r
+	# The wheels drive the belt: one wheel turn advances the belt by the wheel
+	# circumference, so the angle is travel / wheel_r (sign: +X spin pushes the
+	# contact patch backwards, i.e. the vehicle forward).
+	var wrot := -travel / wheel_r
 	for i in 3:
 		var wn: Node3D = J["wheel_%s%d" % [nm, i]]
 		wn.rotation = Vector3(wrot, 0, 0)
+	var rollers: Array = path.get("rollers", [])
+	if not rollers.is_empty():
+		var rrot := -travel / 0.060
+		for rn in rollers:
+			(rn as Node3D).rotation = Vector3(rrot, 0, 0)
+
+
+# ================================================================== locomotion
+
+## Set the signed ground speed of each track (m/s, +Z = forward). This layer is
+## independent of the body clips, so callers can steer with differential track
+## speeds without touching the arm/body animation.
+func set_track_speed(left_mps: float, right_mps: float) -> void:
+	track_vel = Vector2(
+		clampf(left_mps, -MAX_TRACK_SPEED, MAX_TRACK_SPEED),
+		clampf(right_mps, -MAX_TRACK_SPEED, MAX_TRACK_SPEED))
+
+
+func track_speeds() -> Vector2:
+	return track_vel
+
+
+## Move both belts to an absolute distance (metres travelled forward). Used by
+## deterministic renderers and QA; wheels follow from the same distance.
+func set_track_dist(left_m: float, right_m: float) -> void:
+	track_dist = Vector2(left_m, right_m)
+	_apply_tracks()
+
+
+func track_distances() -> Vector2:
+	return track_dist
+
+
+## Integrate the current track speeds and refresh the belts / wheels.
+func advance_tracks(dt: float) -> void:
+	if track_vel == Vector2.ZERO:
+		return
+	track_dist += track_vel * dt
+	_apply_tracks()
+
+
+## Wheel angles in radians; always dist / wheel_r, never an independent value.
+func wheel_angles() -> Vector2:
+	return track_dist / wheel_r
+
+
+func reset_tracks() -> void:
+	track_vel = Vector2.ZERO
+	track_dist = Vector2.ZERO
+	_apply_tracks()
+
+
+func _apply_tracks() -> void:
+	_update_belt("trackL", -track_dist.x)
+	_update_belt("trackR", -track_dist.y)
 
 
 ## Plate transform for one belt index at a given travel. Kept separate from the

@@ -26,7 +26,6 @@ const IDLE_TOTAL := 3.200
 const RUN_TOTAL := 0.720
 const IDLE_TOOL := Vector3(0.160, 1.060, 0.500)
 const IDLE_DIR := Vector3(0.0, 0.075, 0.997)
-const RUN_SPEED_SCALE := 1.0
 
 var kin: ArcKin3
 var P: Dictionary = {}
@@ -93,8 +92,6 @@ func _body(over := {}) -> Dictionary:
 		"body_lift": 0.0, "body_sway": 0.0, "body_shift": 0.0,
 		"body_pitch": 0.0, "body_yaw": 0.0, "body_roll": 0.0,
 		"cam_yaw": 0.0, "cam_pitch": 0.0,
-		"track_L": 0.0, "track_R": 0.0,
-		"wheel_L": 0.0, "wheel_R": 0.0,
 	}
 	for k in over:
 		b[k] = over[k]
@@ -194,10 +191,6 @@ func idle(t: float) -> Dictionary:
 		"body_yaw": 0.5 * sin(ph * 0.5) * D2R,
 		"body_lift": 0.004 * sin(ph * 2.0),
 		"body_sway": 0.004 * sin(ph + 1.1),
-		"track_L": 0.004 * sin(ph * 1.5),
-		"track_R": 0.004 * sin(ph * 1.5 + 0.6),
-		"wheel_L": 0.02 * sin(ph * 1.5),
-		"wheel_R": 0.02 * sin(ph * 1.5 + 0.6),
 		"cam_yaw": 0.02 * sin(ph + 0.3),
 		"cam_pitch": 0.01 * sin(ph * 2.0),
 	})
@@ -205,15 +198,8 @@ func idle(t: float) -> Dictionary:
 	return _solve(body, _idle_target(ph), seed, [idle_swivel], 1.0, false)
 
 
-func _run_cycle_len() -> float:
-	return maxf(kin.track_loop_len(), 0.1)
-
-
 func run(t: float) -> Dictionary:
 	var ph := TAU * t / RUN_TOTAL
-	var loop := kin.track_loop_len()
-	var travel := -loop * (t / RUN_TOTAL)
-	var wheel := TAU * 4.0 * (t / RUN_TOTAL)
 	var body := _body({
 		"body_pitch": (7.5 + 1.3 * sin(ph * 2.0)) * D2R,
 		"body_roll": 2.0 * sin(ph) * D2R,
@@ -222,8 +208,6 @@ func run(t: float) -> Dictionary:
 		"body_lift": -0.006 + 0.010 * sin(ph * 2.0 + 0.6),
 		"body_sway": 0.010 * sin(ph + 0.3),
 		"body_shift": 0.008 * sin(ph * 2.0 + 0.2),
-		"track_L": travel, "track_R": travel,
-		"wheel_L": wheel, "wheel_R": wheel,
 		"cam_yaw": -2.0 * D2R,
 	})
 	var pos := Vector3(0.260 + 0.020 * sin(ph), 1.160 + 0.020 * sin(ph * 2.0 + 0.9),

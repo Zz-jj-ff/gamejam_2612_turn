@@ -40,8 +40,8 @@ const FOOT_R := 0.50
 const ANKLE_H := 0.08
 const WAIST_Y := 0.12
 const TORSO_SCALE := 1.107  # P.torso_scale 0.82 * P.upper_scale 1.35
-const UPPER := 0.62
-const FORE := 0.58
+const UPPER := 0.496
+const FORE := 0.464
 const GRIP := 0.16
 const BLADE_Y0 := 0.28
 const BLADE_LEN := 1.25
@@ -69,6 +69,22 @@ const BASE_POSE := {
 	"crouch": 0.0, "lean": 0.0, "offhand": 0.0, "left_raise": 0.0,
 	"wpx": 0.18, "wpy": 0.17, "wpz": -0.37,
 	"wrx": -0.26, "wry": 0.0, "wrz": 0.08,
+}
+
+## Elbow "pole" overrides (torso space, direction only).  Only the two side
+## thrusts need one: there both fists sit on the same hilt on ONE side of the
+## body, so the left arm has to cross over the right one and the two forearms
+## would otherwise intersect.  The left elbow is parked up-forward (forearm
+## passes above the right forearm) and the right elbow down-forward.  Chosen by
+## sweeping the elbow direction around the shoulder->grip axis and maximising
+## the clearance to the other forearm / hand, the chest and the blade.
+const CROSS_POLES := {
+	"SIDE_THRUST_R": {
+		"L": Vector3(-1.45, 0.75, -0.85), "R": Vector3(0.70, -1.05, -1.05),
+	},
+	"SIDE_THRUST_L": {
+		"L": Vector3(-1.95, 0.10, -0.30), "R": Vector3(1.90, -0.55, -0.35),
+	},
 }
 
 # ---------------------------------------------------------------- public state
@@ -778,15 +794,17 @@ func _update_arms(pose: Dictionary) -> void:
 		var sgn := -1.0
 		var sh: Vector3 = arms[off_idx]["shoulder"].position
 		# low = just outside the hip; high = raised up-left, forward of the
-		# shoulder so the blade can pass underneath the armpit.
-		var low := sh + Vector3(sgn * 0.52, -0.06, -0.45)
-		var high := sh + Vector3(sgn * 0.45, 0.85, -0.55)
+		# shoulder so the blade can pass underneath the armpit.  Offsets are
+		# scaled to the arm length (0.75x of the old 1.20 m arm) so the released
+		# hand stays inside a comfortable elbow bend instead of locking straight.
+		var low := sh + Vector3(sgn * 0.39, -0.045, -0.34)
+		var high := sh + Vector3(sgn * 0.34, 0.64, -0.41)
 		var rest := low.lerp(high, raise)
 		# Swing the releasing hand OUTWARD while it travels: a straight lerp
 		# between the hilt and the raised rest passes too close to the shoulder
 		# and folds the elbow into the upper arm.
 		var out_dir := Vector3(sgn, 0.0, 0.0)
-		target = grips[off_idx].lerp(rest, offhand) + out_dir * (sin(PI * offhand) * 0.22)
+		target = grips[off_idx].lerp(rest, offhand) + out_dir * (sin(PI * offhand) * 0.165)
 	_solve_arm(arms[off_idx], target, hilt_y, hilt_x)
 	_offhand_cur = offhand
 
@@ -802,16 +820,13 @@ func _solve_arm(arm: Dictionary, target: Vector3, hilt_y: Vector3, hilt_x: Vecto
 	var dir := delta.normalized()
 	var pole := Vector3(side * 0.95, -0.85 if side > 0.0 else 0.45, -0.25 if side > 0.0 else 0.05)
 	var sw := clampf(_special_w, 0.0, 1.0)
-	if _special == "SIDE_THRUST_R" and side < 0.0:
-		# Reaching across for the forward grip: elbow high-left-forward so the
-		# forearm passes ABOVE the tucked right forearm instead of through it.
-		pole = pole.lerp(Vector3(-1.45, 0.75, -0.85), sw)
-	if _special == "SIDE_THRUST_R" and side > 0.0:
-		pole = pole.lerp(Vector3(0.70, -1.05, -1.05), sw)
-	if _special == "SIDE_THRUST_L" and side < 0.0:
-		pole = pole.lerp(Vector3(-1.95, 0.10, -0.30), sw)
-	if _special == "SIDE_THRUST_L" and side > 0.0:
-		pole = pole.lerp(Vector3(1.90, -0.55, -0.35), sw)
+	# Per-clip elbow poles (see CROSS_POLES).  The weight ramps with _special_w,
+	# so the elbow glides into and out of these directions instead of snapping.
+	if CROSS_POLES.has(_special):
+		var tbl: Dictionary = CROSS_POLES[_special]
+		var key := "R" if side > 0.0 else "L"
+		if tbl.has(key):
+			pole = pole.lerp(tbl[key], sw)
 	if _special == "BACK_THRUST":
 		if side < 0.0 and _offhand_cur > 0.01:
 			# Released left arm lives BEHIND/above the blade's sweep plane.

@@ -108,7 +108,7 @@ static var RISE_R: Dictionary = {
 		{"t": 0.16, "p": {
 			"ty": -0.32, "tz": 0.05, "tx": 0.02, "hy": 0.26, "hx": 0.06,
 			"crouch": 0.18, "lean": -0.05,
-			"wpx": 0.28, "wpy": 0.16, "wpz": -0.47,
+			"wpx": 0.22, "wpy": 0.16, "wpz": -0.45,
 			"wrx": 0.0, "wry": -2.3731, "wrz": 2.1535,
 		}},
 		{"t": 0.30, "p": {
@@ -151,40 +151,40 @@ static var SIDE_THRUST_R: Dictionary = {
 		{"t": 0.07, "p": {
 			"ty": 0.0, "tz": 0.02, "tx": 0.01, "hy": 0.08, "crouch": 0.03,
 			"lean": -0.01, "offhand": 0.7, "left_raise": 0.0,
-			"wpx": 0.26, "wpy": 0.26, "wpz": -0.46,
+			"wpx": 0.20, "wpy": 0.26, "wpz": -0.44,
 			"wrx": -0.12, "wry": 0.60, "wrz": -1.42,
 		}},
 		{"t": 0.14, "p": {
 			"ty": 0.0, "tz": 0.03, "tx": 0.02, "hy": 0.14, "crouch": 0.06,
 			"lean": -0.02,
-			"wpx": 0.38, "wpy": 0.38, "wpz": -0.42,
+			"wpx": 0.22, "wpy": 0.30, "wpz": -0.44,
 			"wrx": 0.0, "wry": 1.15, "wrz": -1.5708,
 			"offhand": 1.0, "left_raise": 0.0,
 		}},
 		{"t": 0.28, "p": {
 			"ty": 0.0, "tz": -0.02, "tx": -0.01, "hy": 0.02, "crouch": 0.04,
 			"lean": 0.02,
-			"wpx": 0.44, "wpy": 0.43, "wpz": -0.22,
+			"wpx": 0.32, "wpy": 0.40, "wpz": -0.30,
 			"wrx": 0.0, "wry": 0.35, "wrz": -1.5708,
 			"offhand": 1.0, "left_raise": 0.0,
 		}},
 		{"t": 0.34, "p": {
 			"ty": 0.0, "tz": -0.03, "tx": -0.02, "hy": -0.06, "crouch": 0.04,
 			"lean": 0.03,
-			"wpx": 0.46, "wpy": 0.44, "wpz": -0.16,
+			"wpx": 0.32, "wpy": 0.44, "wpz": -0.20,
 			"wrx": 0.0, "wry": 0.0, "wrz": -1.5708,
 			"offhand": 1.0, "left_raise": 0.0,
 		}},
 		{"t": 0.46, "p": {
 			"ty": 0.0, "tz": -0.03, "tx": -0.02, "hy": -0.06, "crouch": 0.05,
 			"lean": 0.04,
-			"wpx": 0.46, "wpy": 0.44, "wpz": -0.16,
+			"wpx": 0.32, "wpy": 0.44, "wpz": -0.20,
 			"wrx": 0.0, "wry": 0.0, "wrz": -1.5708,
 			"offhand": 1.0, "left_raise": 0.0,
 		}},
 		{"t": 0.58, "p": {
 			"ty": 0.0, "tx": 0.0, "hy": 0.02, "crouch": 0.03, "lean": 0.01,
-			"wpx": 0.38, "wpy": 0.34, "wpz": -0.28,
+			"wpx": 0.28, "wpy": 0.34, "wpz": -0.36,
 			"wrx": 0.0, "wry": 0.55, "wrz": -1.5708,
 			"offhand": 1.0, "left_raise": 0.0,
 		}},
@@ -240,13 +240,13 @@ const BACK_WAYPOINTS := [
 		"yaw": 0.20, "crouch": 0.06, "lean": 0.01, "tx": 0.03, "hy": -0.16, "off": 1.00, "raise": 1.00, "roll": 0.55},
 	{"t": 0.58, "h": Vector3(-0.100, 0.300, -0.420), "psi": 1.12, "eps": 0.00,
 		"yaw": 0.29, "crouch": 0.07, "lean": 0.02, "tx": 0.02, "hy": -0.14, "off": 1.00, "raise": 1.00, "roll": 0.85},
-	{"t": 0.68, "h": Vector3(-0.070, 0.260, -0.500), "psi": 0.68, "eps": 0.00,
+	{"t": 0.68, "h": Vector3(-0.070, 0.260, -0.500), "psi": 0.60, "eps": 0.00,
 		"yaw": 0.36, "crouch": 0.075, "lean": 0.03, "tx": 0.01, "hy": -0.10, "off": 1.00, "raise": 1.00, "roll": 1.00},
-	{"t": 0.80, "h": Vector3(-0.060, 0.220, -0.520), "psi": 0.40, "eps": 0.00,
+	{"t": 0.80, "h": Vector3(-0.060, 0.220, -0.520), "psi": 0.26, "eps": 0.00,
 		"yaw": 0.40, "crouch": 0.08, "lean": 0.04, "tx": 0.00, "hy": -0.06, "off": 1.00, "raise": 1.00, "roll": 1.00},
-	{"t": 0.88, "h": Vector3(-0.060, 0.220, -0.520), "psi": 0.40, "eps": 0.00,
+	{"t": 0.88, "h": Vector3(-0.060, 0.220, -0.520), "psi": 0.26, "eps": 0.00,
 		"yaw": 0.40, "crouch": 0.08, "lean": 0.04, "tx": 0.00, "hy": -0.04, "off": 1.00, "raise": 1.00, "roll": 1.00},
-	{"t": 0.98, "h": Vector3(0.010, 0.240, -0.530), "psi": 0.72, "eps": 0.04,
+	{"t": 0.98, "h": Vector3(0.010, 0.240, -0.530), "psi": 0.66, "eps": 0.04,
 		"yaw": 0.34, "crouch": 0.06, "lean": 0.03, "tx": 0.01, "hy": -0.02, "off": 1.00, "raise": 1.00, "roll": 0.85},
 	{"t": 1.07, "h": Vector3(0.070, 0.220, -0.400), "psi": 1.75, "eps": 0.22,
 		"yaw": 0.22, "crouch": 0.04, "lean": 0.01, "tx": 0.02, "hy": 0.02, "off": 1.00, "raise": 1.00, "roll": 0.20},
@@ -603,16 +603,19 @@ static func mirrored(clip: Dictionary) -> Dictionary:
 # ---------------------------------------------------------- special helpers
 ## Core of the right/left side thrust.  u = 0 is the start of the extension,
 ## u = 1 is full reach.  Hilt stays at shoulder height, blade axis is exactly
-## +X * side, blade face vertical.
+## +X * side, blade face vertical.  The lateral travel is what two 1.06 m arms
+## can still hold with both fists on the hilt (the old 0.46 m reach needed
+## 1.33 m arms); the blade is 1.53 m long, so the tip still clears a target
+## standing 1.5 m away.
 static func side_thrust_pose(u: float, side: float) -> Dictionary:
 	u = clampf(u, 0.0, 1.0)
 	var s := signf(side)
 	if s == 0.0:
 		s = 1.0
 	return {
-		"wpx": s * lerpf(0.22, 0.46, u),
-		"wpy": 0.44,
-		"wpz": lerpf(-0.26, -0.16, u),
+		"wpx": s * lerpf(0.24, 0.32, u),
+		"wpy": lerpf(0.38, 0.44, u),
+		"wpz": lerpf(-0.34, -0.20, u),
 		"wrx": 0.0,
 		"wry": 0.0,
 		"wrz": -s * PI * 0.5,

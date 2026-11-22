@@ -18,7 +18,8 @@ const BB = preload("res://scripts/mech/body_builder.gd")
 const P := {
 	"hip_y": 1.235, "hip_r": 0.30, "femur": 0.60, "tibia": 0.66,
 	"foot_r": 0.50, "ankle_h": 0.08, "waist_y": 0.12,
-	"torso_scale": 0.82, "upper": 0.62, "fore": 0.58, "grip": 0.16,
+	"torso_scale": 0.82, "upper": 0.496, "fore": 0.464, "grip": 0.16,
+	"arm_w": 0.86,
 	"upper_scale": 1.35, "lower_scale": 0.78,
 	"blade_y0": 0.28, "blade_len": 1.25,
 }

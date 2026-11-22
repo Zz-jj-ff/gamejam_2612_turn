@@ -431,16 +431,17 @@ static func plate(w: float, h: float, t: float, bevel := 0.012) -> ArrayMesh:
 			var c := loops[l + 1][j]
 			var d := loops[l + 1][i]
 			var mid := (a + bb + c + d) * 0.25
-			var guide := Vector3(mid.x, mid.y, (zs[l + 1] - zs[l]) * 3.0)
+			var dz := -b if l == 0 else (b if l == 2 else 0.0)
+			var guide := Vector3(mid.x, mid.y, dz)
 			_emit_quad(st, a, bb, c, d, guide.normalized(),
 				Vector2(float(i) / 4, float(l) / 3), Vector2(float(i + 1) / 4, float(l) / 3),
 				Vector2(float(i + 1) / 4, float(l + 1) / 3), Vector2(float(i) / 4, float(l + 1) / 3))
 	for i in 4:
 		var j := (i + 1) % 4
-		_emit_tri(st, Vector3(0, 0, zs[0]), loops[0][i], loops[0][j], Vector3.BACK,
+		_emit_tri(st, Vector3(0, 0, zs[0]), loops[0][i], loops[0][j], Vector3.FORWARD,
 			Vector2(0.5, 0.5), Vector2(loops[0][i].x / w + 0.5, loops[0][i].y / h + 0.5),
 			Vector2(loops[0][j].x / w + 0.5, loops[0][j].y / h + 0.5))
-		_emit_tri(st, Vector3(0, 0, zs[3]), loops[3][i], loops[3][j], Vector3.FORWARD,
+		_emit_tri(st, Vector3(0, 0, zs[3]), loops[3][i], loops[3][j], Vector3.BACK,
 			Vector2(0.5, 0.5), Vector2(loops[3][i].x / w + 0.5, loops[3][i].y / h + 0.5),
 			Vector2(loops[3][j].x / w + 0.5, loops[3][j].y / h + 0.5))
 	return st.commit()

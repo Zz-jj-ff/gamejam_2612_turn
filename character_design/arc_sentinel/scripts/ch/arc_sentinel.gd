@@ -9,6 +9,10 @@ extends Node3D
 ## Clips: idle / run (loops), attack1 (overhead chop), attack2 (horizontal
 ## sweep), block (runtime-planned blade parry).
 ##
+## Locomotion (belts + wheels) is a separate layer: see set_track_speed /
+## set_track_travel. Body clips never carry track state, so the chassis can
+## pivot or drive straight while any clip plays.
+##
 ## Contract: anim_names/play_anim/set_playing/is_playing/anim_time/set_anim_time/
 ## anim_duration/set_anim_speed/anim_speed/set_loop/is_looping/param_specs/
 ## set_param/get_param/joint_specs/set_joint/get_joint/rig_debug.
@@ -22,6 +26,7 @@ const AM := preload("res://scripts/ch/arc_materials.gd")
 const MK := preload("res://scripts/kit/mesh_kit.gd")
 
 const D2R := PI / 180.0
+const TAU := PI * 2.0
 const ANIMS := ["idle", "run", "attack1", "attack2", "block"]
 const LOOPS := ["idle", "run"]
 const ONE_SHOTS := ["attack1", "attack2", "block"]
@@ -53,6 +58,12 @@ var _radius_cache := 0.0
 var _clear_cache := 9.0
 var _clear_pair := ["", ""]
 var _prev_t := 0.0
+## True while a caller drives the belts directly (renderers / QA). The clip
+## layer then leaves the track state alone.
+var _track_lock := false
+## External speed command (game code). Persists across clip changes.
+var _track_cmd := Vector2.ZERO
+var _track_cmd_on := false
 
 const GEOM_KEYS := {
 	"cube_size": true, "arm_scale": true, "blade_length": true, "blade_width": true,
@@ -61,7 +72,8 @@ const GEOM_KEYS := {
 const DEFAULTS := {
 	"cube_size": 0.52, "arm_scale": 1.00,
 	"blade_length": 1.030, "blade_width": 0.176,
-	"idle_sway": 1.00, "run_speed": 1.00,
+	"idle_sway": 1.00, "run_speed": 2.00,
+	"track_L_speed": 0.0, "track_R_speed": 0.0,
 	"attack1_lead": 1.00, "attack1_follow": 1.00, "attack1_overshoot": 1.00,
 	"attack2_lead": 1.00, "attack2_follow": 1.00, "attack2_overshoot": 1.00,
 	"block_threat": 0.0, "block_elev": 0.0,
@@ -113,6 +125,7 @@ func _process(dt: float) -> void:
 			_pose = _blend_pose(_fade_from, _pose, k)
 			rig.apply_pose(_pose)
 			_track_lens()
+	_drive_tracks(dt)
 	_update_fx(dt)
 
 
@@ -203,6 +216,82 @@ func is_looping() -> bool:
 	return _loop
 
 
+# ================================================================== locomotion
+
+## The belts + wheels are driven outside the clip system. Set each side's signed
+## ground speed in m/s (+Z forward) and the rig will keep rolling at that speed;
+## the wheel angle is always travel / wheel_r, never an independent value.
+func set_track_speed(left_mps: float, right_mps: float) -> void:
+	_track_lock = false
+	_track_cmd = Vector2(left_mps, right_mps)
+	_track_cmd_on = true
+	rig.set_track_speed(left_mps, right_mps)
+
+
+## Absolute belt phase (metres travelled forward), for deterministic rendering
+## and tests. Freezes the speed until clear_track_control().
+func set_track_travel(left_m: float, right_m: float) -> void:
+	_track_lock = true
+	rig.set_track_speed(0.0, 0.0)
+	rig.set_track_dist(left_m, right_m)
+
+
+## Hand the tracks back to the clip layer (run = run_speed, everything else = 0)
+## and drop the manual L/R speed sliders.
+func clear_track_control() -> void:
+	_track_lock = false
+	_track_cmd_on = false
+	_track_cmd = Vector2.ZERO
+	P["track_L_speed"] = 0.0
+	P["track_R_speed"] = 0.0
+	rig.set_track_speed(0.0, 0.0)
+
+
+func track_state() -> Dictionary:
+	var d := rig.track_distances()
+	var v := rig.track_speeds()
+	var wa := rig.wheel_angles()
+	return {
+		"left_speed": v.x, "right_speed": v.y,
+		"left_travel": d.x, "right_travel": d.y,
+		"left_wheel": wa.x, "right_wheel": wa.y,
+		"wheel_radius": rig.wheel_r, "max_speed": rig.MAX_TRACK_SPEED,
+		"locked": _track_lock, "manual": _track_cmd_on,
+	}
+
+
+## Advance the locomotion layer by hand (QA / fixed-step callers). Normal
+## playback already does this once per frame.
+func step_tracks(dt: float) -> void:
+	rig.advance_tracks(dt)
+
+
+func _drive_tracks(dt: float) -> void:
+	if _track_lock:
+		return
+	# Paused / scrubbed playback freezes clip-driven tracks, but an explicit
+	# speed command from game code keeps running (it is a separate layer).
+	if not _playing and not _track_cmd_on:
+		return
+	var l := 0.0
+	var r := 0.0
+	if _track_cmd_on:
+		l = _track_cmd.x
+		r = _track_cmd.y
+	else:
+		l = float(P["track_L_speed"])
+		r = float(P["track_R_speed"])
+		if absf(l) < 0.0001 and absf(r) < 0.0001:
+			l = 0.0
+			r = 0.0
+			if current_anim == "run":
+				var s := clampf(float(P["run_speed"]) * _speed, 0.0, rig.MAX_TRACK_SPEED)
+				l = s
+				r = s
+	rig.set_track_speed(l, r)
+	rig.advance_tracks(dt)
+
+
 # ================================================================== params
 
 func param_specs() -> Array:
@@ -210,7 +299,9 @@ func param_specs() -> Array:
 	_add_spec(s, "BODY", "cube_size", "turret cube (m)", 0.46, 0.60, 0.01, P["cube_size"])
 	_add_spec(s, "BODY", "arm_scale", "arm length scale", 0.85, 1.15, 0.01, P["arm_scale"])
 	_add_spec(s, "BODY", "idle_sway", "idle sway", 0.0, 2.5, 0.02, P["idle_sway"])
-	_add_spec(s, "BODY", "run_speed", "run cycle speed", 0.5, 1.8, 0.02, P["run_speed"])
+	_add_spec(s, "LOCOMOTION", "run_speed", "run track speed (m/s)", 0.4, 3.0, 0.05, P["run_speed"])
+	_add_spec(s, "LOCOMOTION", "track_L_speed", "manual L track (m/s)", -3.0, 3.0, 0.05, P["track_L_speed"])
+	_add_spec(s, "LOCOMOTION", "track_R_speed", "manual R track (m/s)", -3.0, 3.0, 0.05, P["track_R_speed"])
 	_add_spec(s, "WEAPON", "blade_length", "blade length (m)", 0.85, 1.25, 0.005, P["blade_length"])
 	_add_spec(s, "WEAPON", "blade_width", "blade width (m)", 0.13, 0.23, 0.005, P["blade_width"])
 	_add_spec(s, "ATTACK 1", "attack1_lead", "windup lead-in", 0.6, 1.6, 0.02, P["attack1_lead"])
@@ -258,8 +349,12 @@ func set_param(key: String, value: float) -> void:
 	elif key.begins_with("block_"):
 		anim.P[key] = value
 		anim.plan_block(P["block_threat"], P["block_elev"])
-	elif key == "run_speed":
-		anim.P[key] = value
+	elif key == "track_L_speed" or key == "track_R_speed":
+		# Touching the manual L/R sliders takes the tracks off clip autopilot
+		# and cancels an API speed command.
+		_track_lock = false
+		_track_cmd_on = false
+		rig.set_track_speed(P["track_L_speed"], P["track_R_speed"])
 	elif key == "idle_sway":
 		anim.P[key] = value
 	_apply_now(_t)
@@ -282,10 +377,6 @@ const JOINT_DEFS := [
 	["TURRET", "body_roll", "body roll", -8, 8, 0.5, 1],
 	["OPTIC", "cam_yaw", "eye yaw", -55, 55, 0.5, 1],
 	["OPTIC", "cam_pitch", "eye pitch", -40, 40, 0.5, 1],
-	["TRACKS", "track_L", "belt L travel (m)", -3.0, 3.0, 0.01, 0],
-	["TRACKS", "track_R", "belt R travel (m)", -3.0, 3.0, 0.01, 0],
-	["TRACKS", "wheel_L", "wheel L spin", -720, 720, 1.0, 1],
-	["TRACKS", "wheel_R", "wheel R spin", -720, 720, 1.0, 1],
 	["ARM", "sh_pitch", "shoulder pitch", -170, 170, 0.5, 1],
 	["ARM", "sh_yaw", "shoulder yaw", -170, 170, 0.5, 1],
 	["ARM", "sh_roll", "shoulder roll", -170, 170, 0.5, 1],
@@ -662,6 +753,16 @@ func rig_debug() -> Dictionary:
 	d["blade tip"] = _fmt_v(rig.marker_tip.global_position)
 	d["eye dir"] = _fmt_v(eye_dir())
 	d["eye track"] = "on" if float(P.get("lens_track", 1.0)) >= 0.5 else "authored"
+	var ts := track_state()
+	d["tracks"] = "L %+.2f  R %+.2f m/s  (cap %.1f)" % [
+		float(ts["left_speed"]), float(ts["right_speed"]), float(ts["max_speed"])]
+	d["wheel spin"] = "L %.2f  R %.2f rev  (r %.3f m)" % [
+		float(ts["left_wheel"]) / TAU, float(ts["right_wheel"]) / TAU,
+		float(ts["wheel_radius"])]
+	d["track travel"] = "L %+.2f  R %+.2f m" % [
+		float(ts["left_travel"]), float(ts["right_travel"])]
+	if _track_lock:
+		d["track drive"] = "locked"
 	if _queued != "":
 		d["queued"] = _queued
 	return d
