@@ -8,6 +8,7 @@
 | `basic/` | 三个玩法原型 | ACT 四足刀客、VESPER 程序化主角、3×3 程序化地图/场景 |
 | `character_design/` | 敌人与武器角色工程 | ARC Sentinel、Shard Phantom、Boss Leviathan、少女头部、电弧剑 |
 | `main/` | 独立战斗关卡 | Cargo Hold2 / 霓虹街区 / Galleria |
+| `scenes/` | 场景试验（无战斗） | 仓库 / 回廊实验舱 / 病房 |
 
 各目录的详细能力范围、参数开关与调参说明见各自目录下的 `README.md`。
 
@@ -44,6 +45,15 @@
 | [main/galleria](main/galleria/README.md) | 高台跃下、空中左键坠击、下层中庭与返程阶梯 | 4 基础 + 2 远程 |
 
 两个新关卡沿用 Cargo Hold2 的角色、输入、美术和独立启动管线，均以肃清当前区域为通关条件。Galleria 从高台下落时按左键可发动落地范围攻击。详见各关卡 README。
+
+## scenes 场景试验
+
+纯场景、无敌人，用来验证尺度、走位、可跳平台与灯光；不做通关判定，用 `N` 手动切关。
+每个目录同样是完整的 Godot 4.7.2 工程，`./run.sh -- --<场景名>` 直接进对应场景。
+
+| 目录 | 场景 | 看点 |
+| --- | --- | --- |
+| [scenes/scene_lab](scenes/scene_lab/README.md) | 仓库 / 回廊实验舱 / 病房 | 货架与箱顶攀爬、圆形场地边界、30 张病床 + 中央隔墙 + 12×4.56 m 平面镜 |
 
 ## 运行
 
